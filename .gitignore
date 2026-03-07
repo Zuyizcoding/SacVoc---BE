@@ -1,0 +1,62 @@
+# ════════════════════════════════════════════════════
+# BACKEND .gitignore — Sắc Vóc
+# ════════════════════════════════════════════════════
+
+# --- Virtual Environment ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Environment Variables (SECRETS!) ---
+.env
+
+# --- Database file (sinh ra khi chạy) ---
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# --- Python cache ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+
+# --- Distribution / Packaging ---
+dist/
+build/
+*.egg-info/
+*.egg
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- FashionCLIP model cache (rất nặng ~400MB) ---
+.cache/
+huggingface/
+*.bin
+*.safetensors
+
+# --- OS files ---
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+
+# --- Test / Coverage ---
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# --- Logs ---
+*.log
+logs/
