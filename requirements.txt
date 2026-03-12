@@ -1,29 +1,52 @@
 # ════════════════════════════════════════════════════
-# PRODUCTION DEPENDENCIES — Cài trên cả dev và server
+# DEPENDENCIES — Sắc Vóc Backend
 # ════════════════════════════════════════════════════
 # Cập nhật lần cuối: 2026-03
 # Python yêu cầu: >= 3.12
+#
+# Cài tất cả:
+#   pip install -r requirements.txt
+#
+# Ghi chú FashionCLIP [DEV]:
+#   - Chỉ cần thiết khi chạy scripts/encode_outfits.py (1 lần)
+#   - Kéo theo torch (~2 GB) + transformers (~500 MB)
+#   - Server Railway KHÔNG cần — comment lại trước khi deploy
+# ════════════════════════════════════════════════════
 
-# --- Web Framework ---
+# ── PRODUCTION ───────────────────────────────────────
+
+# Web Framework
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 python-multipart==0.0.20
 
-# --- Data Validation & Settings ---
+# Data Validation & Settings
 pydantic==2.10.5
 pydantic-settings==2.7.1
 
-# --- Database ---
+# Database
 sqlalchemy==2.0.37
 
-# --- AI / Gemini ---
+# AI / Gemini
 google-generativeai==0.8.4
 
-# --- Image Processing ---
+# Image Processing
 Pillow==11.1.0
 
-# --- Math (cosine similarity cho F3) ---
+# Math — cosine similarity cho F3
 numpy==2.2.2
 
-# --- ASGI server cần cho production ---
+# ASGI performance
 httptools==0.6.4
+
+# ── DEV ONLY (comment lại trước khi deploy lên Railway) ──
+
+# FashionCLIP — encode outfit vectors offline, chạy 1 lần
+# Bỏ comment khi cần chạy scripts/encode_outfits.py
+# fashion-clip==0.3.1
+# requests==2.32.3
+
+# Testing & Linting
+pytest==8.3.4
+httpx==0.28.1
+ruff==0.9.4
