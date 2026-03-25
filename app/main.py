@@ -10,7 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.db.database import init_db
-# from app.api.endpoints import analyze, outfit  # Phase 3 + Phase 5
+from app.api.endpoints import analyze
+# from app.api.endpoints import outfit  # Phase 5
 
 
 @asynccontextmanager
@@ -37,7 +38,7 @@ app.add_middleware(
 )
 
 # --- Routers ---
-# app.include_router(analyze.router, prefix="/api/v1", tags=["analyze"])  # Phase 3
+app.include_router(analyze.router, prefix="/api/v1", tags=["analyze"])  # Phase 3
 # app.include_router(outfit.router, prefix="/api/v1", tags=["outfit"])  # Phase 5
 
 
