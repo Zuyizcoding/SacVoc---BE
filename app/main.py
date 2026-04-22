@@ -38,7 +38,7 @@ app.add_middleware(
 )
 
 # --- Routers ---
-app.include_router(analyze.router, prefix="/api/v1", tags=["analyze"])  # Phase 3
+app.include_router(analyze.router, tags=["analyze"])  # Phase 3
 # app.include_router(outfit.router, prefix="/api/v1", tags=["outfit"])  # Phase 5
 
 
