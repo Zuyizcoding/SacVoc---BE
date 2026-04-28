@@ -240,7 +240,7 @@ def recommend_outfits(
         query_vector = query_vector / np.linalg.norm(query_vector)
 
     # Bước 3: Load outfit vectors từ DB
-    outfits, outfit_matrix = _load_outfit_vectors(db, occasion=None)
+    outfits, outfit_matrix = _load_outfit_vectors(db, occasion=occasion)
 
     if len(outfits) == 0:
         # DB trống hoặc chưa encode — trả list rỗng
