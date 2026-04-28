@@ -20,6 +20,7 @@ Luồng xử lý:
 import os
 import logging
 import tempfile
+import json
 
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Header
 from sqlalchemy.orm import Session
@@ -28,10 +29,11 @@ from app.schemas.base import ApiResponse
 from app.schemas.color import ColorApiResponse, ColorGeminiResponse
 from app.schemas.body import BodyApiResponse, BodyGeminiResponse
 from app.services.gemini_client import GeminiClient, get_gemini_client
+from app.schemas.history import HistoryApiResponse
 from app.services.demo_cache import get_demo_color_result, get_demo_body_result
 from app.utils.image_utils import validate_image, compress_image
 from app.db.database import get_db
-from app.db.crud import save_color_result, save_body_result
+from app.db.crud import get_analysis, save_color_result, save_body_result
 from app.data.season_data import get_palette_override
 
 logger = logging.getLogger(__name__)
@@ -277,3 +279,44 @@ async def analyze_body(
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
             logger.info("🗑️ Đã xóa ảnh tạm: %s", tmp_path)
+
+
+# ──────────────────────────────────────────────
+# GET /api/v1/analyze/history (SHOULD — Xem lại kết quả)
+# ──────────────────────────────────────────────
+@router.get(
+    "/history",
+    response_model=ApiResponse[HistoryApiResponse],
+    summary="Xem lại kết quả phân tích F1 + F2",
+    description="Đọc kết quả phân tích đã lưu trong AnalysisHistory.",
+)
+async def get_analysis_history(
+    x_device_id: str = Header(
+        ..., description="SHA256 device ID (Tính năng #3)"
+    ),
+    db: Session = Depends(get_db),
+) -> ApiResponse[HistoryApiResponse]:
+    """Trả về lịch sử F1 + F2 nếu đã phân tích.
+
+    SHOULD: Màn "Xem lại kết quả" đọc *_result_json từ AnalysisHistory.
+    """
+    history = get_analysis(db, x_device_id)
+
+    if history is None:
+        return ApiResponse(success=True, data=HistoryApiResponse())
+
+    color: ColorApiResponse | None = None
+    body: BodyApiResponse | None = None
+
+    if history.color_result_json:
+        color_json = json.loads(history.color_result_json)
+        color = ColorApiResponse.model_validate(color_json)
+
+    if history.body_result_json:
+        body_json = json.loads(history.body_result_json)
+        body = BodyApiResponse.model_validate(body_json)
+
+    return ApiResponse(
+        success=True,
+        data=HistoryApiResponse(color=color, body=body),
+    )
