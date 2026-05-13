@@ -12,6 +12,7 @@ LƯU Ý:
   - Chỉ chạy 1 lần — kiểm tra DB trước khi chạy lại
   - Team thêm ảnh thật + link Shopee thật vào danh sách bên dưới
   - image_url: upload ảnh lên Cloudinary → copy URL
+    - App hỗ trợ cả nam lẫn nữ: khi seed thật, nên có outfit nam + nữ (và đa dạng phong cách)
 """
 import sys
 import os

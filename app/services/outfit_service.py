@@ -53,11 +53,11 @@ SEASON_KEYWORDS: dict[str, str] = {
 # Body shape → silhouette keywords cho FashionCLIP hiểu
 # SHOULD Extended Query: thêm silhouette-specific terms
 BODY_KEYWORDS: dict[str, str] = {
-    "Hourglass":          "fitted waist cinched belted wrap dress bodycon",
-    "Soft Hourglass":     "soft fitted empire waist draping gentle curves",
-    "Rectangle":          "structured layered peplum belt ruffle volume",
-    "Triangle":           "A-line flared skirt off-shoulder statement top",
-    "Inverted Triangle":  "V-neck wide leg palazzo full skirt balance",
+    "Hourglass":          "tailored fitted waist cinched belted wrap structured",
+    "Soft Hourglass":     "soft tailored draping relaxed fitted waist gentle curves",
+    "Rectangle":          "structured layered overshirt jacket belt contrast volume",
+    "Triangle":           "balance upper body structured shoulders jacket crew neck",
+    "Inverted Triangle":  "V-neck straight leg wide leg balance lower body",
 }
 
 # Occasion → style keywords
@@ -65,7 +65,7 @@ OCCASION_KEYWORDS: dict[str, str] = {
     "daily":  "casual everyday comfortable relaxed streetwear",
     "work":   "office professional formal blazer tailored",
     "party":  "evening glamorous sparkle sequin cocktail",
-    "date":   "romantic feminine elegant chic flirty",
+    "date":   "romantic elegant chic smart casual",
 }
 
 
