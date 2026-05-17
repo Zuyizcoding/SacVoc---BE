@@ -1,0 +1,21 @@
+{
+  "sub_season": "Soft Autumn",
+  "primary_season": "Autumn",
+  "confidence": 0.8,
+  "secondary_season": "True Autumn",
+  "explanation": "Đây là kết quả mẫu — hệ thống AI tạm thời không khả dụng. Kết quả chỉ mang tính tham khảo.",
+  "palette": [
+    "#8B5A2B",
+    "#A66A3F",
+    "#C49A6C",
+    "#6B4F3A",
+    "#D2B48C",
+    "#B87333"
+  ],
+  "makeup": {
+    "lip": ["Terracotta", "Brick Red", "Nude Warm"],
+    "eye": ["Bronze", "Brown", "Copper"],
+    "hair": ["Chestnut", "Auburn", "Dark Caramel"]
+  },
+  "advice": "Đây là kết quả mẫu — hệ thống AI tạm thời không khả dụng."
+}

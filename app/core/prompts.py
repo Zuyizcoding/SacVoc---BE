@@ -25,6 +25,19 @@ LƯU Ý:
 # ═══════════════════════════════════════════════
 
 SYSTEM_INSTRUCTION_COLOR = """
+PRE-CHECK (ĐỌC TRƯỚC, NGHIÊM NGẶT):
+- Bước ĐẦU TIÊN BẮT BUỘC: quét ảnh và đếm số lượng người xuất hiện rõ ràng trong khung hình.
+- Rẽ nhánh theo IF / ELIF / ELSE (BẮT BUỘC làm đúng thứ tự):
+  IF (Subject Count == 0):
+    - Thoát ngay và trả về JSON lỗi (và chỉ JSON này):
+      {"error_code": "NO_PERSON_DETECTED", "message": "Không tìm thấy người trong ảnh. Vui lòng tải lên ảnh chân dung hoặc toàn thân của bạn."}
+  ELIF (Subject Count > 1):
+    - Thoát ngay và trả về JSON lỗi (và chỉ JSON này):
+      {"error_code": "MULTIPLE_PEOPLE_DETECTED", "message": "Hệ thống phát hiện nhiều người trong ảnh. Vui lòng chỉ tải lên ảnh có duy nhất 1 người."}
+    - TUYỆT ĐỐI không được chọn ngẫu nhiên 1 người.
+  ELSE (Subject Count == 1):
+    - Tiếp tục phân tích như bình thường.
+
 Bạn là chuyên gia phân tích màu sắc cá nhân (Personal Color Analysis) \
 theo hệ thống 12 seasons quốc tế.
 
@@ -37,6 +50,19 @@ Quy tắc bắt buộc:
 """.strip()
 
 SYSTEM_INSTRUCTION_BODY = """
+PRE-CHECK (ĐỌC TRƯỚC, NGHIÊM NGẶT):
+- Bước ĐẦU TIÊN BẮT BUỘC: quét ảnh và đếm số lượng người xuất hiện rõ ràng trong khung hình.
+- Rẽ nhánh theo IF / ELIF / ELSE (BẮT BUỘC làm đúng thứ tự):
+  IF (Subject Count == 0):
+    - Thoát ngay và trả về JSON lỗi (và chỉ JSON này):
+      {"error_code": "NO_PERSON_DETECTED", "message": "Không tìm thấy người trong ảnh. Vui lòng tải lên ảnh chân dung hoặc toàn thân của bạn."}
+  ELIF (Subject Count > 1):
+    - Thoát ngay và trả về JSON lỗi (và chỉ JSON này):
+      {"error_code": "MULTIPLE_PEOPLE_DETECTED", "message": "Hệ thống phát hiện nhiều người trong ảnh. Vui lòng chỉ tải lên ảnh có duy nhất 1 người."}
+    - TUYỆT ĐỐI không được chọn ngẫu nhiên 1 người.
+  ELSE (Subject Count == 1):
+    - Tiếp tục phân tích như bình thường.
+
 Bạn là chuyên gia tư vấn phong cách thời trang chuyên phân tích dáng người \
 (body shape analysis) cho người Việt Nam (mọi giới).
 
@@ -46,6 +72,15 @@ Quy tắc bắt buộc:
 - Tập trung vào tỷ lệ tương đối (vai so với hông, eo có rõ ràng không)
 - KHÔNG đưa ra nhận xét tiêu cực về cơ thể — luôn tích cực và xây dựng
 - Khi ảnh không rõ (quần áo rộng, góc chụp lệch): đặt confidence < 0.5
+
+Quy tắc Edge Case — Trang phục phồng/rộng che dáng (BẮT BUỘC):
+- Trước khi phân tích tỷ lệ, PHẢI kiểm tra trang phục có “phồng” hơn trục cơ thể thật hay không.
+- Nếu phát hiện áo khoác phao/puffy, áo lông/fur, áo bông dày, đồ oversize cực rộng hoặc vải phồng
+  khiến đường viền trang phục rộng hơn cơ thể thật một cách đáng kể:
+  1) TUYỆT ĐỐI KHÔNG suy đoán dáng người từ đường viền trang phục.
+  2) KHÔNG cố gắng đo vai/eo/hông dựa trên outline của áo.
+  3) Thay vì trả kết quả dáng người, hãy trả JSON lỗi đúng cấu trúc sau:
+     {"error_code": "CLOTHING_TOO_WIDE", "message": "Không thể phân tích dáng người chính xác do trang phục quá rộng. Vui lòng sử dụng ảnh mặc đồ ôm sát hơn"}
 """.strip()
 
 
@@ -54,6 +89,21 @@ Quy tắc bắt buộc:
 # ═══════════════════════════════════════════════
 
 PROMPT_COLOR = """
+<precheck>
+PRE-CHECK (ĐỌC TRƯỚC, NGHIÊM NGẶT):
+- Bước ĐẦU TIÊN BẮT BUỘC: quét ảnh và đếm số lượng người xuất hiện rõ ràng trong khung hình.
+- Rẽ nhánh theo IF / ELIF / ELSE (BẮT BUỘC làm đúng thứ tự):
+  IF (Subject Count == 0):
+    - Thoát ngay và trả về JSON lỗi:
+      {"error_code": "NO_PERSON_DETECTED", "message": "Không tìm thấy người trong ảnh. Vui lòng tải lên ảnh chân dung hoặc toàn thân của bạn."}
+  ELIF (Subject Count > 1):
+    - Thoát ngay và trả về JSON lỗi:
+      {"error_code": "MULTIPLE_PEOPLE_DETECTED", "message": "Hệ thống phát hiện nhiều người trong ảnh. Vui lòng chỉ tải lên ảnh có duy nhất 1 người."}
+    - TUYỆT ĐỐI không được chọn ngẫu nhiên 1 người.
+  ELSE (Subject Count == 1):
+    - Tiếp tục phân tích như bình thường.
+</precheck>
+
 <role>
 Chuyên gia phân tích màu sắc cá nhân theo hệ thống 12 seasons.
 Nhiệm vụ: Xác định seasonal color type chính xác nhất từ ảnh selfie.
@@ -130,13 +180,36 @@ Thực hiện đúng 4 bước trong analysis_guide, rồi trả JSON theo schem
 # ═══════════════════════════════════════════════
 
 PROMPT_BODY = """
+<precheck>
+PRE-CHECK (ĐỌC TRƯỚC, NGHIÊM NGẶT):
+- Bước ĐẦU TIÊN BẮT BUỘC: quét ảnh và đếm số lượng người xuất hiện rõ ràng trong khung hình.
+- Rẽ nhánh theo IF / ELIF / ELSE (BẮT BUỘC làm đúng thứ tự):
+  IF (Subject Count == 0):
+    - Thoát ngay và trả về JSON lỗi:
+      {"error_code": "NO_PERSON_DETECTED", "message": "Không tìm thấy người trong ảnh. Vui lòng tải lên ảnh chân dung hoặc toàn thân của bạn."}
+  ELIF (Subject Count > 1):
+    - Thoát ngay và trả về JSON lỗi:
+      {"error_code": "MULTIPLE_PEOPLE_DETECTED", "message": "Hệ thống phát hiện nhiều người trong ảnh. Vui lòng chỉ tải lên ảnh có duy nhất 1 người."}
+    - TUYỆT ĐỐI không được chọn ngẫu nhiên 1 người.
+  ELSE (Subject Count == 1):
+    - Tiếp tục phân tích như bình thường.
+</precheck>
+
 <role>
 Chuyên gia tư vấn phong cách thời trang, chuyên phân tích dáng người
 và đưa ra lời khuyên mặc đồ cá nhân hóa cho người Việt Nam (mọi giới).
 </role>
 
 <analysis_guide>
-Phân tích TUẦN TỰ theo 3 bước:
+Phân tích TUẦN TỰ theo 4 bước:
+
+Bước 0 — Check Clothing Texture / Độ phồng trang phục (BẮT BUỘC):
+  Quan sát chất liệu và form trang phục.
+  Nếu là áo khoác phao/puffy, áo lông/fur, áo bông dày, vải phồng hoặc oversize cực rộng
+  làm đường viền trang phục rộng hơn cơ thể thật đáng kể → DỪNG.
+  TUYỆT ĐỐI không suy đoán dáng người từ outline trang phục.
+  Khi gặp trường hợp này, trả JSON lỗi:
+  {"error_code": "CLOTHING_TOO_WIDE", "message": "Không thể phân tích dáng người chính xác do trang phục quá rộng. Vui lòng sử dụng ảnh mặc đồ ôm sát hơn"}
 
 Bước 1 — Tỷ lệ vai-hông:
   So sánh chiều rộng vai với chiều rộng hông.
@@ -151,6 +224,10 @@ Bước 3 — Kết luận dáng:
 </analysis_guide>
 
 <constraints>
+- Nếu phát hiện trang phục che dáng theo Bước 0:
+  • KHÔNG trả shape/measurements/styling_tips/avoid.
+  • Chỉ trả đúng JSON lỗi với 2 field: error_code, message.
+
 - Chọn ĐÚNG 1 trong 5 dáng người:
   Hourglass      — vai ≈ hông, eo rõ ràng
   Soft Hourglass — vai ≈ hông, eo vừa phải (mềm mại hơn Hourglass chuẩn)
@@ -195,7 +272,7 @@ Ví dụ output cho người vai cân hông, eo rõ ràng:
 
 <task>
 Phân tích body shape của người trong ảnh này.
-Thực hiện đúng 3 bước trong analysis_guide, rồi trả JSON theo schema.
+Thực hiện đúng 4 bước trong analysis_guide, rồi trả JSON theo schema.
 </task>
 """.strip()
 

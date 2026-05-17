@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     # --- Gemini ---
     GEMINI_API_KEY: str
     GEMINI_MODEL: str = "gemini-2.5-flash"
-    GEMINI_TIMEOUT: int = 15            # giây
+    GEMINI_TIMEOUT: int = 60            # giây (vision requests thường chậm hơn)
     GEMINI_MAX_RETRIES: int = 3
     GEMINI_THINKING_BUDGET: int = 1024  # token cho suy luận nội bộ
 

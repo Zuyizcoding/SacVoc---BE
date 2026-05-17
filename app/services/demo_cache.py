@@ -75,13 +75,13 @@ def _fallback_body() -> dict:
             "waist_definition": "defined",
         },
         "styling_tips": [
-            "Chọn đồ ôm vừa vặn để tôn đường cong",
-            "Váy chữ A luôn phù hợp",
-            "Thắt lưng giúp nhấn eo",
+            "Ưu tiên trang phục vừa vặn, có phom rõ để cân đối tỷ lệ",
+            "Dùng đường dọc (áo khoác, sơ mi, quần ống đứng) để nhìn gọn và cao hơn",
+            "Nhấn eo vừa phải bằng cách chọn cạp quần phù hợp hoặc layer áo khoác ngắn",
         ],
         "avoid": [
-            "Đồ quá rộng che mất đường cong",
-            "Váy bút chì quá chật",
+            "Đồ quá rộng/không có phom làm mất tỷ lệ",
+            "Đồ quá bó ở một điểm gây mất cân đối tổng thể",
         ],
         "explanation": "Đây là kết quả mẫu — hệ thống AI tạm thời không khả dụng.",
     }

@@ -23,14 +23,15 @@ import tempfile
 import json
 
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Header
+from google.api_core.exceptions import DeadlineExceeded
 from sqlalchemy.orm import Session
 
 from app.schemas.base import ApiResponse
 from app.schemas.color import ColorApiResponse, ColorGeminiResponse
 from app.schemas.body import BodyApiResponse, BodyGeminiResponse
+from app.core.prompts import get_body_prompts, get_color_prompts
 from app.services.gemini_client import GeminiClient, get_gemini_client
 from app.schemas.history import HistoryApiResponse
-from app.services.demo_cache import get_demo_color_result, get_demo_body_result
 from app.utils.image_utils import validate_image, compress_image
 from app.db.database import get_db
 from app.db.crud import get_analysis, save_color_result, save_body_result
@@ -120,20 +121,25 @@ async def analyze_color(
             tmp_path = tmp.name
 
         # --- Bước 5: Gọi Gemini (Tính năng #10, #11, #12) ---
-        try:
-            result = await client.analyze(
-                image_bytes=compressed,
-                prompt=PROMPT_F1,
-                response_schema=ColorGeminiResponse,
-                system_instruction=SYSTEM_INSTRUCTION_F1,
+        system_instruction_f1, prompt_f1 = get_color_prompts()
+        result = await client.analyze(
+            image_bytes=compressed,
+            prompt=prompt_f1,
+            response_schema=ColorGeminiResponse,
+            system_instruction=system_instruction_f1,
+        )
+
+        # If Gemini returns a structured error, propagate as an API-level error.
+        if result.get("error_code") is not None:
+            return ApiResponse(
+                success=False,
+                data=None,
+                error=result.get(
+                    "message",
+                    "Không thể phân tích ảnh. Vui lòng thử lại với ảnh rõ hơn.",
+                ),
+                error_code=422,
             )
-        except RuntimeError as exc:
-            if "CIRCUIT_BREAKER_OPEN" in str(exc):
-                # Tính năng #13 + #14: fallback demo cache
-                logger.warning("⚡ Dùng demo cache cho F1")
-                result = get_demo_color_result()
-            else:
-                raise
 
         # --- Bước 6: Override palette từ season_data.py (Tính năng #20) ---
         result["palette"] = get_palette_override(result["sub_season"])
@@ -159,6 +165,13 @@ async def analyze_color(
 
     except TimeoutError:
         logger.error("⏱️ Gemini timeout cho F1")
+        raise HTTPException(
+            status_code=503,
+            detail="AI đang bận. Vui lòng thử lại sau 5 giây.",
+        )
+
+    except DeadlineExceeded:
+        logger.error("⏱️ Gemini timeout (DeadlineExceeded) cho F1")
         raise HTTPException(
             status_code=503,
             detail="AI đang bận. Vui lòng thử lại sau 5 giây.",
@@ -225,19 +238,27 @@ async def analyze_body(
             tmp.write(compressed)
             tmp_path = tmp.name
 
-        try:
-            result = await client.analyze(
-                image_bytes=compressed,
-                prompt=PROMPT_F2,
-                response_schema=BodyGeminiResponse,
-                system_instruction=SYSTEM_INSTRUCTION_F2,
+        system_instruction_f2, prompt_f2 = get_body_prompts()
+
+        result = await client.analyze(
+            image_bytes=compressed,
+            prompt=prompt_f2,
+            response_schema=BodyGeminiResponse,
+            system_instruction=system_instruction_f2,
+        )
+
+        # If Gemini returns a structured error, propagate as an API-level error
+        # (frontend already expects `success=false` with `error` message).
+        if result.get("error_code") is not None:
+            return ApiResponse(
+                success=False,
+                data=None,
+                error=result.get(
+                    "message",
+                    "Không thể phân tích dáng người chính xác do trang phục quá rộng.",
+                ),
+                error_code=422,
             )
-        except RuntimeError as exc:
-            if "CIRCUIT_BREAKER_OPEN" in str(exc):
-                logger.warning("⚡ Dùng demo cache cho F2")
-                result = get_demo_body_result()
-            else:
-                raise
 
         save_body_result(
             db=db,
@@ -256,6 +277,12 @@ async def analyze_body(
         raise
 
     except TimeoutError:
+        raise HTTPException(
+            status_code=503,
+            detail="AI đang bận. Vui lòng thử lại sau 5 giây.",
+        )
+
+    except DeadlineExceeded:
         raise HTTPException(
             status_code=503,
             detail="AI đang bận. Vui lòng thử lại sau 5 giây.",
