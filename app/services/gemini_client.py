@@ -25,13 +25,7 @@ from typing import Type
 
 import google.generativeai as genai
 from fastapi import HTTPException
-from google.api_core.exceptions import (
-    DeadlineExceeded,
-    InternalServerError,
-    ResourceExhausted,
-    ServiceUnavailable,
-    TooManyRequests,
-)
+from google.api_core import exceptions as gapi_exceptions
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from pydantic import BaseModel
 
@@ -288,6 +282,29 @@ class GeminiClient:
             },
         )
 
+    @staticmethod
+    def _is_retryable_error(exc: Exception) -> bool:
+        """Lỗi tạm thời có thể retry/backoff."""
+        retryable_types = (
+            TimeoutError,
+            ConnectionError,
+            gapi_exceptions.DeadlineExceeded,
+            gapi_exceptions.ResourceExhausted,
+            gapi_exceptions.ServiceUnavailable,
+            gapi_exceptions.TooManyRequests,
+            gapi_exceptions.InternalServerError,
+            gapi_exceptions.BadGateway,
+            gapi_exceptions.GatewayTimeout,
+        )
+        return isinstance(exc, retryable_types)
+
+    @staticmethod
+    async def _sleep_backoff(attempt: int) -> None:
+        """Exponential backoff + jitter để giảm dồn tải khi Gemini nghẽn."""
+        base = min(2 ** (attempt - 1), 6)
+        jitter = random.uniform(0.0, 0.5)
+        await asyncio.sleep(base + jitter)
+
     async def analyze(
         self,
         image_bytes: bytes,
@@ -350,7 +367,10 @@ class GeminiClient:
 
                 return validated.model_dump()
 
-            except (ResourceExhausted, TooManyRequests) as exc:
+            except (
+                gapi_exceptions.ResourceExhausted,
+                gapi_exceptions.TooManyRequests,
+            ) as exc:
                 # Quota exceeded / rate limited (HTTP 429) → không retry.
                 last_exception = exc
                 self._breaker.record_error()
@@ -360,7 +380,7 @@ class GeminiClient:
                 )
                 _raise_ai_overloaded_http()
 
-            except InternalServerError as exc:
+            except gapi_exceptions.InternalServerError as exc:
                 # Upstream 500 — có thể transient, retry theo policy; nếu hết retry → map 429 cho UX.
                 last_exception = exc
                 self._breaker.record_error()
@@ -377,7 +397,12 @@ class GeminiClient:
                     continue
                 _raise_ai_overloaded_http()
 
-            except (DeadlineExceeded, ServiceUnavailable) as exc:
+            except (
+                gapi_exceptions.DeadlineExceeded,
+                gapi_exceptions.ServiceUnavailable,
+                gapi_exceptions.BadGateway,
+                gapi_exceptions.GatewayTimeout,
+            ) as exc:
                 last_exception = exc
                 self._breaker.record_error()
                 logger.warning(
@@ -394,25 +419,53 @@ class GeminiClient:
                 if attempt < settings.GEMINI_MAX_RETRIES:
                     backoff = min(2.0 ** (attempt - 1), 8.0) + random.uniform(0.0, 0.5)
                     await asyncio.sleep(backoff)
-                continue
+                    continue
+                _raise_ai_overloaded_http()
 
             except Exception as exc:
                 last_exception = exc
                 self._breaker.record_error()
+                is_retryable = self._is_retryable_error(exc)
                 logger.warning(
-                    "❌ Gemini attempt %d failed: %s", attempt, str(exc)
+                    "❌ Gemini attempt %d/%d failed (retryable=%s): %s",
+                    attempt,
+                    settings.GEMINI_MAX_RETRIES,
+                    is_retryable,
+                    str(exc),
                 )
+                # Retry có backoff cho lỗi tạm thời (timeout/quota/server busy)
+                if is_retryable and attempt < settings.GEMINI_MAX_RETRIES:
+                    await self._sleep_backoff(attempt)
+                    continue
 
-                if self._breaker.is_open:
+                # Hết lượt retry cho lỗi tạm thời → trả 429 thân thiện
+                if is_retryable:
                     _raise_ai_overloaded_http()
 
-        # Hết retry — raise exception cuối cùng
+                # Lỗi không retryable: dừng ngay
+                raise
+
+        # Hết retry — fallback an toàn
         if self._breaker.is_open:
             _raise_ai_overloaded_http()
 
-        if isinstance(last_exception, (InternalServerError, ResourceExhausted, TooManyRequests)):
+        if isinstance(
+            last_exception,
+            (
+                gapi_exceptions.InternalServerError,
+                gapi_exceptions.ResourceExhausted,
+                gapi_exceptions.TooManyRequests,
+                gapi_exceptions.DeadlineExceeded,
+                gapi_exceptions.ServiceUnavailable,
+                gapi_exceptions.BadGateway,
+                gapi_exceptions.GatewayTimeout,
+            ),
+        ):
             _raise_ai_overloaded_http()
-        raise last_exception  # type: ignore[misc]
+
+        if last_exception is not None:
+            raise last_exception
+        raise RuntimeError("Gemini call failed with unknown error")
 
 
 # ──────────────────────────────────────────────

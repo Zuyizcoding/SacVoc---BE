@@ -7,10 +7,8 @@
 # Cài tất cả:
 #   pip install -r requirements.txt
 #
-# Ghi chú FashionCLIP [DEV]:
-#   - Chỉ cần thiết khi chạy scripts/encode_outfits.py (1 lần)
-#   - Kéo theo torch (~2 GB) + transformers (~500 MB)
-#   - Server Railway KHÔNG cần — comment lại trước khi deploy
+# Dev dependencies (pytest/ruff/FashionCLIP, v.v.) đã được tách ra:
+#   pip install -r requirements-dev.txt
 # ════════════════════════════════════════════════════
 
 # ── PRODUCTION ───────────────────────────────────────
@@ -38,15 +36,3 @@ numpy==2.2.2
 
 # ASGI performance
 httptools==0.6.4
-
-# ── DEV ONLY (comment lại trước khi deploy lên Railway) ──
-
-# FashionCLIP — encode outfit vectors offline, chạy 1 lần
-# Bỏ comment khi cần chạy scripts/encode_outfits.py
-fashion-clip==0.3.1
-requests==2.32.3
-
-# Testing & Linting
-pytest==8.3.4
-httpx==0.28.1
-ruff==0.9.4
