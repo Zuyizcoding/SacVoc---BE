@@ -122,6 +122,7 @@ def build_outfit_query(
 def _load_outfit_vectors(
     db: Session,
     occasion: str | None = None,
+    gender: str | None = None,
 ) -> tuple[list[Outfit], np.ndarray]:
     """Load tất cả outfit có vector từ DB → numpy matrix.
 
@@ -139,6 +140,9 @@ def _load_outfit_vectors(
 
     if occasion:
         query = query.filter(Outfit.occasion == occasion)
+
+    if gender and gender != "any":
+        query = query.filter(Outfit.gender == gender)
 
     outfits = query.all()
 
@@ -195,6 +199,7 @@ def recommend_outfits(
     color_sub_season: str,
     body_shape: str,
     occasion: str = "daily",
+    gender: str = "any",
     top_k: int = 6,
     text_encoder=None,
 ) -> OutfitRecommendResponse:
@@ -240,7 +245,7 @@ def recommend_outfits(
         query_vector = query_vector / np.linalg.norm(query_vector)
 
     # Bước 3: Load outfit vectors từ DB
-    outfits, outfit_matrix = _load_outfit_vectors(db, occasion=occasion)
+    outfits, outfit_matrix = _load_outfit_vectors(db, occasion=occasion, gender=gender)
 
     if len(outfits) == 0:
         # DB trống hoặc chưa encode — trả list rỗng

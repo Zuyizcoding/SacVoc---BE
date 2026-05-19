@@ -53,7 +53,7 @@ def encode_all() -> None:
     try:
         from fashion_clip.fashion_clip import FashionCLIP
     except ImportError:
-        print("❌ Chưa cài fashion-clip. Chạy: pip install fashion-clip")
+        print("ERROR: fashion-clip is not installed. Run: pip install fashion-clip")
         return
 
     init_db()
@@ -61,9 +61,24 @@ def encode_all() -> None:
 
     try:
         # Khởi tạo model (lần đầu sẽ download ~400MB)
-        print("🔄 Loading FashionCLIP model...")
-        fclip = FashionCLIP("fashion-clip")
-        print("✅ Model loaded!")
+        print("Loading FashionCLIP model...")
+        try:
+            fclip = FashionCLIP("fashion-clip")
+        except TypeError as e:
+            # Known issue: fashion-clip==0.3.1 is incompatible with transformers>=5
+            msg = str(e)
+            if "use_auth_token" in msg:
+                print(
+                    "ERROR: FashionCLIP failed to load due to incompatible transformers version.\n"
+                    "Fix (recommended):\n"
+                    "  pip install \"transformers<5\" \"huggingface-hub<1\" --upgrade --force-reinstall\n"
+                    "Alternative (no model download):\n"
+                    "  python -m scripts.encode_outfits_dummy\n"
+                )
+                return
+            raise
+
+        print("Model loaded")
 
         # Lấy outfit chưa có vector
         outfits = db.query(Outfit).filter(
@@ -74,7 +89,7 @@ def encode_all() -> None:
             print("ℹ️  Tất cả outfit đã có vector — không cần encode lại.")
             return
 
-        print(f"📦 Encoding {len(outfits)} outfits...")
+        print(f"Encoding {len(outfits)} outfits...")
 
         success_count = 0
         for i, outfit in enumerate(outfits, 1):
@@ -98,10 +113,10 @@ def encode_all() -> None:
             # Lưu BLOB vào DB
             outfit.vector_blob = vector.tobytes()
             success_count += 1
-            print("OK ✓")
+            print("OK")
 
         db.commit()
-        print(f"\n✅ Encode xong: {success_count}/{len(outfits)} outfits.")
+        print(f"\nOK Encode done: {success_count}/{len(outfits)} outfits.")
 
     finally:
         db.close()

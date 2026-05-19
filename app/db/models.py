@@ -159,6 +159,11 @@ class Outfit(Base):
         comment="daily | work | party | date — Tính năng #28"
     )
 
+    gender: str = Column(
+        String(10), nullable=False, default="any",
+        comment="any | male | female — dùng để filter recommendation khi seed data có cả nam/nữ"
+    )
+
     # ─── FashionCLIP Embedding (Tính năng #29) ───
     vector_blob: bytes | None = Column(
         LargeBinary, nullable=True,
