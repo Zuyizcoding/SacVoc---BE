@@ -87,7 +87,8 @@ class BodyGeminiResponse(BaseModel):
     def _coerce_legacy_keys_and_fill_defaults(cls, data):
         """Gemini đôi khi trả key khác schema (vd: `recommend`).
 
-        Với F2 MVP, ưu tiên: không fail toàn bộ request nếu đã có `shape`.
+        Với F2, chỉ normalize/canonicalize input. Không tự bơm lời khuyên
+        hoặc giải thích không có căn cứ từ ảnh.
         """
         if not isinstance(data, dict):
             return data
@@ -113,40 +114,6 @@ class BodyGeminiResponse(BaseModel):
         data["styling_tips"] = _split_to_list(data.get("styling_tips"), max_items=3)
         data["avoid"] = _split_to_list(data.get("avoid"), max_items=2)
 
-        # If Gemini didn't provide measurements, fill a neutral default.
-        if data.get("measurements") is None:
-            data["measurements"] = {
-                "shoulder_relative": "balanced",
-                "hip_relative": "balanced",
-                "waist_definition": "moderate",
-            }
-
-        # Confidence default: conservative but non-blocking.
-        if data.get("confidence") is None:
-            data["confidence"] = 0.6
-
-        # Explanation default if missing but we have a shape.
-        if not data.get("explanation") and data.get("shape"):
-            data["explanation"] = (
-                "Kết quả được suy ra từ tỷ lệ vai–eo–hông quan sát được trong ảnh. "
-                "Nếu ảnh mặc đồ quá rộng hoặc góc chụp lệch, độ chính xác có thể giảm."
-            )
-
-        # Avoid default if still missing
-        if not data.get("avoid"):
-            data["avoid"] = [
-                "Đồ oversize quá rộng có thể che tỷ lệ cơ thể — ưu tiên phom vừa vặn",
-                "Trang phục quá nhiều chi tiết ở phần bạn muốn thu gọn có thể làm tổng thể nặng nề",
-            ]
-
-        # Styling tips default if still missing
-        if not data.get("styling_tips"):
-            data["styling_tips"] = [
-                "Ưu tiên trang phục có phom vừa vặn (tailored) để tôn tỷ lệ",
-                "Dùng thắt lưng/chiết eo nhẹ để tạo điểm nhấn cân đối",
-                "Chọn quần/váy dáng cơ bản (ống đứng/chữ A) để tổng thể gọn gàng",
-            ]
-
         return data
 
     @model_validator(mode="after")
@@ -158,37 +125,26 @@ class BodyGeminiResponse(BaseModel):
             return self
 
         # Success path: minimally require `shape`. Other fields can be defaulted
-        # (Gemini sometimes omits them even with response_schema).
+        # và sẽ được endpoint quyết định có đủ grounded để trả cho user hay chưa.
         if not self.shape:
             raise ValueError("Missing required field for successful analysis: shape")
 
-        # Defensive defaults (should already be set by the `before` validator).
-        if self.confidence is None:
-            self.confidence = 0.6
-        if self.measurements is None:
-            self.measurements = BodyMeasurements(
-                shoulder_relative="balanced",
-                hip_relative="balanced",
-                waist_definition="moderate",
-            )
-        if not self.styling_tips:
-            self.styling_tips = [
-                "Ưu tiên trang phục có phom vừa vặn (tailored) để tôn tỷ lệ",
-                "Dùng thắt lưng/chiết eo nhẹ để tạo điểm nhấn cân đối",
-                "Chọn quần/váy dáng cơ bản (ống đứng/chữ A) để tổng thể gọn gàng",
-            ]
-        if not self.avoid:
-            self.avoid = [
-                "Đồ oversize quá rộng có thể che tỷ lệ cơ thể — ưu tiên phom vừa vặn",
-                "Trang phục quá nhiều chi tiết ở phần bạn muốn thu gọn có thể làm tổng thể nặng nề",
-            ]
-        if not self.explanation:
-            self.explanation = (
-                "Kết quả được suy ra từ tỷ lệ vai–eo–hông quan sát được trong ảnh. "
-                "Nếu ảnh mặc đồ quá rộng hoặc góc chụp lệch, độ chính xác có thể giảm."
-            )
-
         return self
+
+    def missing_detail_fields(self) -> list[str]:
+        """Các field cần có để trả BodyApiResponse grounded cho frontend."""
+        missing: list[str] = []
+
+        if self.measurements is None:
+            missing.append("measurements")
+        if not self.styling_tips:
+            missing.append("styling_tips")
+        if not self.avoid:
+            missing.append("avoid")
+        if not self.explanation:
+            missing.append("explanation")
+
+        return missing
 
 
 class BodyApiResponse(BaseModel):

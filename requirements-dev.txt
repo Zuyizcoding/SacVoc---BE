@@ -1,0 +1,21 @@
+# ════════════════════════════════════════════════════
+# DEV-ONLY DEPENDENCIES — Sắc Vóc Backend
+# ════════════════════════════════════════════════════
+# Python yêu cầu: >= 3.12
+# Cài sau khi đã cài requirements.txt:
+#   pip install -r requirements.txt
+#   pip install -r requirements-dev.txt
+#
+# Lưu ý FashionCLIP:
+# - Chỉ cần khi chạy scripts/encode_outfits.py (encode vectors offline)
+# - Có thể kéo theo các dependency nặng (torch/transformers) tùy platform
+# ════════════════════════════════════════════════════
+
+# FashionCLIP — encode outfit vectors offline, chạy 1 lần
+fashion-clip==0.2.2
+requests==2.32.3
+
+# Testing & Linting
+pytest==8.3.4
+httpx==0.28.1
+ruff==0.9.4

@@ -32,7 +32,7 @@ from app.schemas.outfit import (
     OutfitItem,
     OutfitRecommendResponse,
 )
-from app.services.outfit_service import recommend_outfits
+from app.services.outfit_service import RecommendationNotReadyError, recommend_outfits
 
 
 router = APIRouter()
@@ -127,10 +127,17 @@ async def get_outfit_recommendations(
             occasion=occasion,
             gender=gender,
             top_k=6,
-            text_encoder=None,  # TODO: inject FashionCLIP khi deploy
         )
 
         return ApiResponse(success=True, data=result)
+
+    except RecommendationNotReadyError as exc:
+        return ApiResponse(
+            success=False,
+            data=None,
+            error=str(exc),
+            error_code=503,
+        )
 
     except Exception as e:
         # Tính năng #34: Error handling — log + trả 503

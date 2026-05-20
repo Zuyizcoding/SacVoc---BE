@@ -32,6 +32,11 @@ from app.db.database import SessionLocal, init_db
 from app.db.models import Outfit
 
 
+def _safe_console_text(value: object) -> str:
+    text = str(value)
+    return text.encode("ascii", errors="replace").decode("ascii")
+
+
 def _default_csv_path() -> str:
     return os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "outfitseed.csv"))
 
@@ -85,7 +90,11 @@ def prune(csv_path: str, *, commit: bool) -> None:
         print(f"EXTRA_TO_DELETE={len(extras)}")
 
         for o in extras[:30]:
-            print(f"  DELETE id={o.id} name={o.name!r} url={o.shopee_url!r}")
+            print(
+                _safe_console_text(
+                    f"  DELETE id={o.id} name={o.name!r} url={o.shopee_url!r}"
+                )
+            )
 
         if not extras:
             print("OK: DB already matches CSV; nothing to delete")

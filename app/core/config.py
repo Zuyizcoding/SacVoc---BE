@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # --- Database ---
     DATABASE_URL: str = "sqlite:///./sac_voc.db"
 
+    # --- F3 Recommendation ---
+    F3_QUERY_VECTORS_PATH: str = "data/query_vectors.json"
+    F3_RUNTIME_TEXT_ENCODER_MODEL: str = "fashion-clip"
+
     @field_validator("DEBUG", mode="before")
     @classmethod
     def parse_debug(cls, value: Any) -> Any:

@@ -1,44 +1,33 @@
-"""FashionCLIP Encoding — Chạy offline trên máy dev.
+﻿"""Offline outfit image embedding for F3.
 
-Tính năng #29:
-  1. Load FashionCLIP model (fashion-clip)
-  2. Đọc 80 ảnh outfit từ URLs trong DB
-  3. Encode mỗi ảnh → vector 512 dims (float32)
-  4. Lưu vector dạng BLOB vào cột `vector_blob` trong bảng Outfit
-
-Cách chạy:
-    pip install fashion-clip Pillow requests
-    cd src/backend
+Usage:
+    cd CS4153.Q24.CTTT---BE
     python -m scripts.encode_outfits
 
-Re-encode (ghi đè vector hiện có):
+Optional:
     python -m scripts.encode_outfits --force
-
-SAU KHI CHẠY:
-  - Mỗi outfit row sẽ có vector_blob (2048 bytes)
-  - Server chỉ cần numpy để tính cosine similarity
-  - Server KHÔNG cần install fashion-clip (model nặng ~400MB)
-
-LƯU Ý QUAN TRỌNG:
-  - Script này KHÔNG chạy trên server Railway (không đủ RAM)
-  - Chỉ chạy trên máy dev có ít nhất 4GB RAM
-  - Nếu ảnh URL lỗi → bỏ qua, in warning
+    python -m scripts.encode_outfits --fail-on-mismatch
 """
-import sys
-import os
 
 import argparse
 import csv
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import os
+import sys
+from io import BytesIO
 
 import numpy as np
 import requests
-from io import BytesIO
 from PIL import Image
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.db.database import SessionLocal, init_db
 from app.db.models import Outfit
+
+
+def _safe_console_text(value: object) -> str:
+    text = str(value)
+    return text.encode("ascii", errors="replace").decode("ascii")
 
 
 def _default_csv_path() -> str:
@@ -69,26 +58,75 @@ def _in_csv(*, name: str, url: str, csv_urls: set[str], csv_names: set[str]) -> 
 
 
 def download_image(url: str) -> Image.Image | None:
-    """Tải ảnh từ URL — trả None nếu lỗi."""
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         return Image.open(BytesIO(response.content)).convert("RGB")
-    except Exception as e:
-        print(f"  ⚠️  Lỗi tải ảnh {url}: {e}")
+    except Exception as exc:
+        print(f"  WARN download failed {url}: {exc}")
         return None
 
 
-def encode_all() -> None:
-    """Encode tất cả outfit chưa có vector → lưu BLOB vào DB."""
-    # Import FashionCLIP (chỉ cần trên máy dev)
+def _to_numpy_features(raw, projection_layer=None) -> np.ndarray:
+    if hasattr(raw, "cpu"):
+        return raw.cpu().numpy()
+
+    pooled = getattr(raw, "pooler_output", None)
+    if pooled is None:
+        raise TypeError(f"Unsupported feature output type: {type(raw)}")
+
+    if projection_layer is not None:
+        in_features = getattr(projection_layer, "in_features", None)
+        if in_features is None or pooled.shape[-1] == in_features:
+            pooled = projection_layer(pooled)
+
+    return pooled.cpu().numpy()
+
+
+def _build_image_encoder():
+    """Create real image encoder: prefer FashionCLIP, fallback to HF CLIP."""
     try:
         from fashion_clip.fashion_clip import FashionCLIP
-    except ImportError:
-        print("ERROR: fashion-clip is not installed. Run: pip install fashion-clip")
-        return
 
-    parser = argparse.ArgumentParser(description="Encode outfit vectors with FashionCLIP")
+        print("Loading FashionCLIP model...")
+        fclip = FashionCLIP("fashion-clip")
+        print("Model loaded (backend=fashion_clip)")
+
+        def _encode(image: Image.Image) -> np.ndarray:
+            return fclip.encode_images([image], batch_size=1)[0]
+
+        return _encode, "fashion_clip"
+    except Exception as exc:
+        print(f"FashionCLIP unavailable, fallback to transformers CLIP: {exc}")
+
+    try:
+        import torch
+        from transformers import CLIPModel, CLIPProcessor
+    except Exception as exc:
+        print(
+            "ERROR: missing image-encoder dependencies. "
+            "Install fashion-clip or torch + transformers. "
+            f"Detail: {exc}"
+        )
+        return None, None
+
+    print("Loading transformers CLIP (openai/clip-vit-base-patch32)...")
+    processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+    model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+    print("Model loaded (backend=hf_clip)")
+
+    def _encode(image: Image.Image) -> np.ndarray:
+        with torch.no_grad():
+            inputs = processor(images=[image], return_tensors="pt")
+            raw = model.get_image_features(**inputs)
+            features = _to_numpy_features(raw, projection_layer=getattr(model, "visual_projection", None))
+        return features[0]
+
+    return _encode, "hf_clip"
+
+
+def encode_all() -> None:
+    parser = argparse.ArgumentParser(description="Encode outfit vectors for F3")
     parser.add_argument(
         "--force",
         action="store_true",
@@ -98,7 +136,7 @@ def encode_all() -> None:
         "--csv",
         dest="csv_path",
         default=_default_csv_path(),
-        help="CSV path to cross-check DB outfits (default: src/backend/outfitseed.csv)",
+        help="CSV path to cross-check DB outfits",
     )
     parser.add_argument(
         "--fail-on-mismatch",
@@ -111,27 +149,10 @@ def encode_all() -> None:
     db = SessionLocal()
 
     try:
-        # Khởi tạo model (lần đầu sẽ download ~400MB)
-        print("Loading FashionCLIP model...")
-        try:
-            fclip = FashionCLIP("fashion-clip")
-        except TypeError as e:
-            # Known issue: fashion-clip==0.3.1 is incompatible with transformers>=5
-            msg = str(e)
-            if "use_auth_token" in msg:
-                print(
-                    "ERROR: FashionCLIP failed to load due to incompatible transformers version.\n"
-                    "Fix (recommended):\n"
-                    "  pip install \"transformers<5\" \"huggingface-hub<1\" --upgrade --force-reinstall\n"
-                    "Alternative (no model download):\n"
-                    "  python -m scripts.encode_outfits_dummy\n"
-                )
-                return
-            raise
+        image_encoder, backend = _build_image_encoder()
+        if image_encoder is None:
+            return
 
-        print("Model loaded")
-
-        # Optional safety check: warn if DB has outfits not present in CSV.
         csv_path = os.path.abspath(args.csv_path)
         if os.path.exists(csv_path):
             try:
@@ -144,62 +165,57 @@ def encode_all() -> None:
                 ]
                 if extras:
                     print(
-                        f"WARNING: DB has {len(db_all)} outfits but CSV has {csv_rows} rows; "
-                        f"{len(extras)} outfit(s) exist in DB but not in CSV: {csv_path}"
+                        f"WARNING: DB has {len(db_all)} outfits but CSV has {csv_rows}; "
+                        f"{len(extras)} extra outfit(s) in DB"
                     )
                     for item in extras[:10]:
-                        print("  EXTRA", item)
+                        print(_safe_console_text(f"  EXTRA {item}"))
                     if args.fail_on_mismatch:
-                        print(
-                            "ERROR: mismatch detected (--fail-on-mismatch enabled). "
-                            "Aborting without encoding. "
-                            "Fix by pruning extra DB rows or re-run without --fail-on-mismatch."
-                        )
+                        print("ERROR: mismatch detected (--fail-on-mismatch). Abort.")
                         return
             except Exception as exc:
                 print(f"WARNING: CSV cross-check failed: {exc}")
 
-        # Lấy outfit cần encode
         query = db.query(Outfit)
         if not args.force:
             query = query.filter(Outfit.vector_blob.is_(None))
         outfits = query.all()
 
         if not outfits:
-            if args.force:
-                print("ℹ️  Không có outfit nào để encode.")
-            else:
-                print("ℹ️  Tất cả outfit đã có vector — không cần encode lại.")
+            print("INFO: no outfit needs encoding.")
             return
 
-        print(f"Encoding {len(outfits)} outfits...")
+        print(f"Encoding {len(outfits)} outfits (backend={backend})...")
 
         success_count = 0
         for i, outfit in enumerate(outfits, 1):
-            print(f"  [{i}/{len(outfits)}] {outfit.name}...", end=" ")
+            safe_name = _safe_console_text(outfit.name)
+            print(f"  [{i}/{len(outfits)}] {safe_name}...", end=" ")
 
-            # Tải ảnh
             image = download_image(outfit.image_url)
             if image is None:
                 print("SKIP")
                 continue
 
-            # Encode ảnh → vector 512 dims
-            image_embedding = fclip.encode_images(
-                [image], batch_size=1
-            )  # shape: (1, 512)
+            try:
+                encoded = image_encoder(image)
+            except Exception as exc:
+                print(f"SKIP (encode error: {exc})")
+                continue
 
-            # Normalize vector (L2 norm) — cosine similarity = dot product
-            vector = image_embedding[0].astype(np.float32)
-            vector = vector / np.linalg.norm(vector)
+            vector = encoded.astype(np.float32)
+            norm = np.linalg.norm(vector)
+            if norm == 0:
+                print("SKIP (zero-norm vector)")
+                continue
 
-            # Lưu BLOB vào DB
+            vector = vector / norm
             outfit.vector_blob = vector.tobytes()
             success_count += 1
             print("OK")
 
         db.commit()
-        print(f"\nOK Encode done: {success_count}/{len(outfits)} outfits.")
+        print(f"OK encode done: {success_count}/{len(outfits)} outfits.")
 
     finally:
         db.close()

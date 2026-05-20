@@ -200,6 +200,31 @@ def get_palette_override(sub_season: str) -> list[str]:
     return entry["palette"]
 
 
+def canonicalize_sub_season(sub_season: str) -> str | None:
+    """Chuẩn hóa sub-season Gemini trả về về đúng key trong lookup table."""
+    normalized = (sub_season or "").strip()
+    if not normalized:
+        return None
+
+    if normalized in SEASON_DATA:
+        return normalized
+
+    lowered = normalized.casefold()
+    for key in SEASON_DATA:
+        if key.casefold() == lowered:
+            return key
+
+    return None
+
+
+def get_season_entry(sub_season: str) -> SeasonEntry:
+    """Lấy full metadata của một sub-season sau khi đã canonicalize."""
+    canonical = canonicalize_sub_season(sub_season)
+    if canonical is None:
+        raise KeyError(f"Sub-season không hợp lệ: {sub_season}")
+    return SEASON_DATA[canonical]
+
+
 def get_season_gradient(sub_season: str) -> tuple[str, str]:
     """Lấy gradient colors cho SeasonGradientCard (frontend).
 

@@ -35,43 +35,57 @@ from app.schemas.history import HistoryApiResponse
 from app.utils.image_utils import validate_image, compress_image
 from app.db.database import get_db
 from app.db.crud import get_analysis, save_color_result, save_body_result
-from app.data.season_data import get_palette_override
+from app.data.season_data import (
+    canonicalize_sub_season,
+    get_season_entry,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/analyze", tags=["Analysis"])
 
 
-# ──────────────────────────────────────────────
-# Prompts — sẽ chuyển sang file riêng ở Sprint 2
-# ──────────────────────────────────────────────
-# TODO: Chuyển sang src/backend/app/core/prompts.py (xem ENHANCED_SHOULD_IMPLEMENTATION)
-SYSTEM_INSTRUCTION_F1 = (
-    "Bạn là chuyên gia phân tích màu sắc cá nhân (Personal Color Analysis). "
-    "Luôn trả lời bằng JSON hợp lệ theo schema được cung cấp. "
-    "Khi không chắc chắn, hạ confidence xuống thay vì đoán."
-)
+def _canonicalize_color_result(result: dict) -> dict:
+    """Chuẩn hóa F1 bằng bảng season_data trước khi lưu/trả về."""
+    sub_season_raw = str(result.get("sub_season") or "").strip()
+    canonical_sub_season = canonicalize_sub_season(sub_season_raw)
+    if canonical_sub_season is None:
+        raise ValueError(f"Invalid sub-season from Gemini: {sub_season_raw}")
 
-PROMPT_F1 = """
-<task>
-Phân tích seasonal color type của người trong ảnh này.
-Phân tích TUẦN TỰ: undertone da → độ sáng → màu tóc → màu mắt → kết luận sub-season.
-</task>
-"""
+    entry = get_season_entry(canonical_sub_season)
+    result["sub_season"] = canonical_sub_season
+    result["primary_season"] = entry["primary"]
+    result["palette"] = entry["palette"]
+    result["makeup"] = entry["makeup"]
+    return result
 
-SYSTEM_INSTRUCTION_F2 = (
-    "Bạn là chuyên gia tư vấn phong cách thời trang. "
-    "Luôn trả lời bằng JSON hợp lệ theo schema được cung cấp. "
-    "Styling tips phải bằng tiếng Việt tự nhiên, cụ thể và cá nhân hóa."
-)
 
-PROMPT_F2 = """
-<task>
-Phân tích body shape của người trong ảnh này.
-Tập trung vào tỷ lệ: vai, eo, hông.
-Đưa ra mẹo mặc đồ cá nhân hóa dựa trên đặc điểm cụ thể quan sát được.
-</task>
-"""
+def _merge_body_result(base: dict, patch: dict) -> dict:
+    """Merge partial F2 payloads, ưu tiên dữ liệu mới khi field có giá trị."""
+    merged = dict(base)
+    for key, value in patch.items():
+        if value is None:
+            continue
+        if isinstance(value, list) and not value:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        merged[key] = value
+    return merged
+
+
+def _build_body_completion_prompt(missing_fields: list[str], partial_result: dict) -> str:
+    """Prompt ngắn để yêu cầu Gemini chỉ hoàn thiện field F2 còn thiếu."""
+    missing_text = ", ".join(missing_fields)
+    return (
+        "<task>\n"
+        "Bạn vừa phân tích body shape từ ảnh này nhưng còn thiếu một số field bắt buộc.\n"
+        f"Hãy phân tích lại cùng ảnh và trả JSON hoàn chỉnh, tập trung bổ sung: {missing_text}.\n"
+        "Nếu ảnh không đủ rõ để kết luận chắc chắn, hãy trả JSON lỗi CLOTHING_TOO_WIDE hoặc giữ confidence thấp,\n"
+        "nhưng không được bịa mẹo mặc đồ chung chung.\n"
+        f"Partial result trước đó để tham chiếu: {json.dumps(partial_result, ensure_ascii=False)}\n"
+        "</task>"
+    )
 
 
 # ──────────────────────────────────────────────
@@ -141,8 +155,8 @@ async def analyze_color(
                 error_code=422,
             )
 
-        # --- Bước 6: Override palette từ season_data.py (Tính năng #20) ---
-        result["palette"] = get_palette_override(result["sub_season"])
+        # --- Bước 6: Canonicalize F1 từ season_data.py (Tính năng #20) ---
+        result = _canonicalize_color_result(result)
 
         # --- Bước 7: Lưu vào ANALYSIS_HISTORY ---
         save_color_result(
@@ -260,17 +274,68 @@ async def analyze_body(
                 error_code=422,
             )
 
+        parsed_result = BodyGeminiResponse.model_validate(result)
+        missing_fields = parsed_result.missing_detail_fields()
+        if missing_fields:
+            logger.warning(
+                "F2 thiếu field grounded sau lượt đầu: %s | device=%s",
+                missing_fields,
+                x_device_id[:8],
+            )
+            repair_prompt = _build_body_completion_prompt(missing_fields, result)
+            repaired = await client.analyze(
+                image_bytes=compressed,
+                prompt=repair_prompt,
+                response_schema=BodyGeminiResponse,
+                system_instruction=system_instruction_f2,
+            )
+
+            if repaired.get("error_code") is not None:
+                return ApiResponse(
+                    success=False,
+                    data=None,
+                    error=repaired.get(
+                        "message",
+                        "Không thể phân tích dáng người chính xác từ ảnh hiện tại.",
+                    ),
+                    error_code=422,
+                )
+
+            result = _merge_body_result(result, repaired)
+            parsed_result = BodyGeminiResponse.model_validate(result)
+            missing_fields = parsed_result.missing_detail_fields()
+
+        if missing_fields:
+            logger.warning(
+                "F2 vẫn thiếu field sau repair pass: %s | device=%s",
+                missing_fields,
+                x_device_id[:8],
+            )
+            return ApiResponse(
+                success=False,
+                data=None,
+                error=(
+                    "Ảnh chưa đủ rõ để đưa ra gợi ý dáng người đáng tin cậy. "
+                    "Vui lòng dùng ảnh toàn thân, đứng thẳng và mặc đồ ôm sát hơn."
+                ),
+                error_code=422,
+            )
+
+        response_payload = parsed_result.model_dump()
+        if response_payload.get("confidence") is None:
+            response_payload["confidence"] = 0.4
+
         save_body_result(
             db=db,
             device_id=x_device_id,
-            shape=result["shape"],
-            confidence=result["confidence"],
-            full_result=result,
+            shape=parsed_result.shape,
+            confidence=float(response_payload["confidence"]),
+            full_result=response_payload,
         )
 
         return ApiResponse(
             success=True,
-            data=BodyApiResponse.model_validate(result),
+            data=BodyApiResponse.model_validate(response_payload),
         )
 
     except HTTPException:

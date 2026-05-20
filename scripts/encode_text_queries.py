@@ -1,73 +1,101 @@
-"""
-Pre-encode text queries cho F3 Semantic Search (Cách A — optional).
+﻿"""Pre-encode F3 text query vectors."""
 
-Nếu server Railway không đủ RAM load FashionCLIP:
-  1. Chạy script này trên máy dev
-  2. Xuất ra file query_vectors.json
-  3. Server đọc file này thay vì encode realtime
-
-Cách chạy:
-    cd src/backend
-    python -m scripts.encode_text_queries
-"""
 import json
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
 import numpy as np
 
-# ═══════════════════════════════════════════════
-# DANH SÁCH TEMPLATE QUERIES
-# ═══════════════════════════════════════════════
-# Mỗi query = 1 tổ hợp (season × body_shape × occasion)
-# Format: "A {season_adjective} outfit for {body_shape} body, {occasion} style"
+from app.services.outfit_service import (
+    BODY_KEYWORDS,
+    OCCASION_KEYWORDS,
+    SEASON_KEYWORDS,
+    build_outfit_query,
+)
 
-QUERY_TEMPLATES: list[str] = [
-    # Spring × daily
-    "A warm peachy spring outfit for hourglass body, casual daily style",
-    "A warm peachy spring outfit for rectangle body, casual daily style",
-    "A warm peachy spring outfit for triangle body, casual daily style",
-    # Summer × daily
-    "A cool pastel summer outfit for hourglass body, casual daily style",
-    "A cool pastel summer outfit for rectangle body, casual daily style",
-    # Autumn × daily
-    "A warm earthy autumn outfit for hourglass body, casual daily style",
-    "A warm earthy autumn outfit for rectangle body, casual daily style",
-    # Winter × daily
-    "A cool bold winter outfit for hourglass body, casual daily style",
-    "A cool bold winter outfit for rectangle body, casual daily style",
-    # ... Thêm cho work/party/date × các dáng khác ...
-]
+
+def _all_query_templates() -> list[str]:
+    queries: list[str] = []
+    for season in SEASON_KEYWORDS:
+        for body_shape in BODY_KEYWORDS:
+            for occasion in OCCASION_KEYWORDS:
+                queries.append(build_outfit_query(season, body_shape, occasion))
+    return queries
+
+
+def _to_numpy_features(raw, projection_layer=None) -> np.ndarray:
+    """Handle both tensor output and model-output object (transformers v5+)."""
+    if hasattr(raw, "cpu"):
+        return raw.cpu().numpy()
+
+    pooled = getattr(raw, "pooler_output", None)
+    if pooled is None:
+        raise TypeError(f"Unsupported feature output type: {type(raw)}")
+
+    if projection_layer is not None:
+        in_features = getattr(projection_layer, "in_features", None)
+        if in_features is None or pooled.shape[-1] == in_features:
+            pooled = projection_layer(pooled)
+
+    return pooled.cpu().numpy()
 
 
 def encode_queries() -> None:
-    """Encode tất cả template queries → lưu file JSON."""
+    queries = _all_query_templates()
+    text_embeddings = None
+
     try:
         from fashion_clip.fashion_clip import FashionCLIP
-    except ImportError:
-        print("❌ pip install fashion-clip")
-        return
 
-    print("🔄 Loading FashionCLIP...")
-    fclip = FashionCLIP("fashion-clip")
+        print("Loading FashionCLIP...")
+        fclip = FashionCLIP("fashion-clip")
+        print(f"Encoding {len(queries)} queries with FashionCLIP...")
+        text_embeddings = fclip.encode_text(queries, batch_size=32)
+    except Exception as exc:
+        print(f"FashionCLIP unavailable, fallback to transformers CLIP: {exc}")
 
-    print(f"📝 Encoding {len(QUERY_TEMPLATES)} queries...")
-    text_embeddings = fclip.encode_text(QUERY_TEMPLATES, batch_size=32)
+    if text_embeddings is None:
+        try:
+            import torch
+            from transformers import CLIPModel, CLIPProcessor
+        except Exception:
+            print("ERROR: Missing encoder deps. Install torch + transformers or fashion-clip.")
+            return
 
-    # Normalize
+        print("Loading transformers CLIP (openai/clip-vit-base-patch32)...")
+        processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+
+        print(f"Encoding {len(queries)} queries with transformers CLIP...")
+        with torch.no_grad():
+            inputs = processor(
+                text=queries,
+                images=None,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+            )
+            raw = model.get_text_features(**inputs)
+            text_embeddings = _to_numpy_features(raw, projection_layer=getattr(model, "text_projection", None))
+
     norms = np.linalg.norm(text_embeddings, axis=1, keepdims=True)
     text_embeddings = text_embeddings / norms
 
-    # Lưu file
     output = {}
-    for query, vector in zip(QUERY_TEMPLATES, text_embeddings):
+    for query, vector in zip(queries, text_embeddings):
         output[query] = vector.astype(np.float32).tolist()
 
-    output_path = "data/query_vectors.json"
-    os.makedirs("data", exist_ok=True)
-    with open(output_path, "w") as f:
-        json.dump(output, f)
+    output_dir = os.path.join(os.path.dirname(__file__), "..", "data")
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, "query_vectors.json")
 
-    print(f"✅ Saved {len(output)} vectors → {output_path}")
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(output, f, ensure_ascii=False)
+
+    print(f"Saved {len(output)} vectors -> {output_path}")
 
 
 if __name__ == "__main__":
-    import os
     encode_queries()

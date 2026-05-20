@@ -12,7 +12,7 @@ Tuân thủ:
 FLOW CHÍNH:
   1. Đọc sub_season (F1) + shape (F2) từ DB
   2. build_outfit_query() → chuỗi text tiếng Anh
-  3. Encode text → vector 512 dims (FashionCLIP)
+  3. Encode text → vector 512 dims (FashionCLIP hoặc query vector đã pre-encode)
   4. Load tất cả outfit vectors từ DB
   5. Cosine similarity = dot product (đã normalize sẵn)
   6. Trả top-6 outfit có score cao nhất
@@ -22,13 +22,163 @@ LƯU Ý:
   - KHÔNG cần FAISS hay vector DB — numpy đủ cho 80 items
   - Mặc định occasion="daily" nếu user chưa chọn
 """
-import hashlib
+import json
+import logging
+from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.models import Outfit
 from app.schemas.outfit import OutfitItem, OutfitRecommendResponse
+
+logger = logging.getLogger(__name__)
+
+
+class RecommendationNotReadyError(RuntimeError):
+    """F3 chưa sẵn sàng vì thiếu embedding/query vector thật."""
+
+
+class RuntimeFashionClipTextEncoder:
+    """Lazy wrapper cho text encoder thật (FashionCLIP hoặc CLIP fallback)."""
+
+    def __init__(self, model_name: str) -> None:
+        self._backend = "unknown"
+        self._model = None
+        self._processor = None
+
+        try:
+            from fashion_clip.fashion_clip import FashionCLIP
+
+            self._model = FashionCLIP(model_name)
+            self._backend = "fashion_clip"
+            return
+        except Exception as exc:
+            logger.info("FashionCLIP runtime unavailable, fallback to transformers CLIP: %s", str(exc))
+
+        from transformers import CLIPModel, CLIPProcessor
+
+        self._processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        self._model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+        self._backend = "hf_clip"
+
+    def encode_text(self, texts: list[str]) -> np.ndarray:
+        if self._backend == "fashion_clip":
+            return self._model.encode_text(texts, batch_size=32)
+
+        # HuggingFace CLIP fallback
+        with __import__("torch").no_grad():
+            inputs = self._processor(
+                text=texts,
+                images=None,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+            )
+            raw = self._model.get_text_features(**inputs)
+            if hasattr(raw, "cpu"):
+                features = raw
+            else:
+                pooled = getattr(raw, "pooler_output", None)
+                if pooled is None:
+                    raise TypeError(f"Unsupported text feature output: {type(raw)}")
+                projection = getattr(self._model, "text_projection", None)
+                if projection is not None:
+                    in_features = getattr(projection, "in_features", None)
+                    if in_features is None or pooled.shape[-1] == in_features:
+                        pooled = projection(pooled)
+                features = pooled
+        return features.cpu().numpy()
+
+    @property
+    def backend(self) -> str:
+        return self._backend
+
+
+def _project_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _resolve_query_vectors_path() -> Path:
+    configured = Path(settings.F3_QUERY_VECTORS_PATH)
+    if configured.is_absolute():
+        return configured
+    return _project_root() / configured
+
+
+def _normalize_vector(vector: np.ndarray) -> np.ndarray:
+    vec = vector.astype(np.float32)
+    norm = np.linalg.norm(vec)
+    if norm == 0:
+        raise ValueError("Embedding vector has zero norm")
+    return vec / norm
+
+
+@lru_cache(maxsize=1)
+def _load_precomputed_query_vectors() -> dict[str, np.ndarray]:
+    path = _resolve_query_vectors_path()
+    if not path.exists():
+        logger.info("F3 query vector file not found: %s", path)
+        return {}
+
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("Failed to read query vector file %s: %s", path, str(exc))
+        return {}
+
+    vectors: dict[str, np.ndarray] = {}
+    for query_text, vector_list in raw.items():
+        try:
+            vector = np.asarray(vector_list, dtype=np.float32)
+            if vector.shape != (512,):
+                raise ValueError(f"unexpected shape {vector.shape}")
+            vectors[str(query_text)] = _normalize_vector(vector)
+        except Exception as exc:
+            logger.warning("Skip invalid query vector for '%s': %s", query_text, str(exc))
+
+    logger.info("Loaded %d precomputed F3 query vectors from %s", len(vectors), path)
+    return vectors
+
+
+@lru_cache(maxsize=1)
+def _get_runtime_text_encoder() -> RuntimeFashionClipTextEncoder | None:
+    try:
+        return RuntimeFashionClipTextEncoder(settings.F3_RUNTIME_TEXT_ENCODER_MODEL)
+    except ImportError:
+        logger.info("Runtime FashionCLIP is unavailable in current environment")
+        return None
+    except Exception as exc:
+        logger.warning("Failed to initialize runtime FashionCLIP encoder: %s", str(exc))
+        return None
+
+
+def _resolve_query_vector(
+    query_text: str,
+    text_encoder=None,
+) -> tuple[np.ndarray, str]:
+    """Lấy query vector thật cho F3, không fallback sang vector giả."""
+    if text_encoder is not None:
+        encoded = text_encoder.encode_text([query_text])[0]
+        return _normalize_vector(np.asarray(encoded, dtype=np.float32)), "injected_encoder"
+
+    precomputed_vectors = _load_precomputed_query_vectors()
+    if query_text in precomputed_vectors:
+        return precomputed_vectors[query_text], "precomputed_query_vector"
+
+    runtime_encoder = _get_runtime_text_encoder()
+    if runtime_encoder is not None:
+        encoded = runtime_encoder.encode_text([query_text])[0]
+        source = f"runtime_{runtime_encoder.backend}"
+        return _normalize_vector(np.asarray(encoded, dtype=np.float32)), source
+
+    path = _resolve_query_vectors_path()
+    raise RecommendationNotReadyError(
+        "Chức năng gợi ý trang phục chưa sẵn sàng. "
+        f"Cần encoder FashionCLIP thật hoặc file query vectors tại '{path}'."
+    )
 
 
 # ═══════════════════════════════════════════════
@@ -223,7 +373,7 @@ def recommend_outfits(
         occasion: "daily" | "work" | "party" | "date" (mặc định "daily")
         top_k: Số outfit trả về (mặc định 6)
         text_encoder: FashionCLIP instance hoặc hàm encode text → vector.
-                      Nếu None → dùng dummy vectors (cho unit test / demo cache).
+                      Nếu None → thử query vectors pre-encode, rồi mới thử runtime encoder.
 
     Returns:
         OutfitRecommendResponse chứa query_used + list OutfitItem (top-6)
@@ -235,29 +385,19 @@ def recommend_outfits(
     query_text = build_outfit_query(color_sub_season, body_shape, occasion)
 
     # Bước 2: Encode text → vector
-    if text_encoder is not None:
-        # Production: dùng FashionCLIP instance
-        query_vector = text_encoder.encode_text([query_text])[0]
-        query_vector = query_vector.astype(np.float32)
-        query_vector = query_vector / np.linalg.norm(query_vector)
-    else:
-        # Fallback / Demo: tạo pseudo-random vector theo query_text.
-        # - Tránh seed cố định (kết quả luôn y hệt dù ảnh khác).
-        # - Vẫn deterministic theo (color_sub_season, body_shape, occasion).
-        seed_bytes = hashlib.sha256(query_text.encode("utf-8")).digest()[:8]
-        seed_int = int.from_bytes(seed_bytes, byteorder="little", signed=False)
-        rng = np.random.default_rng(seed=seed_int)
-        query_vector = rng.standard_normal(512).astype(np.float32)
-        query_vector = query_vector / np.linalg.norm(query_vector)
+    query_vector, query_source = _resolve_query_vector(
+        query_text,
+        text_encoder=text_encoder,
+    )
+    logger.info("F3 query vector source=%s | query=%s", query_source, query_text)
 
     # Bước 3: Load outfit vectors từ DB
     outfits, outfit_matrix = _load_outfit_vectors(db, occasion=occasion, gender=gender)
 
     if len(outfits) == 0:
-        # DB trống hoặc chưa encode — trả list rỗng
-        return OutfitRecommendResponse(
-            query_used=query_text,
-            outfits=[],
+        raise RecommendationNotReadyError(
+            "Dữ liệu outfit chưa sẵn sàng cho gợi ý. "
+            "Hãy seed outfit và encode vector_blob thật trước khi dùng F3."
         )
 
     # Bước 4: Cosine similarity
