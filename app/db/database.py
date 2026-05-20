@@ -11,7 +11,7 @@ LƯU Ý:
   - connect_args check_same_thread=False: bắt buộc với SQLite + FastAPI (async)
   - Tạo bảng tự động khi app khởi động (create_all)
 """
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from typing import Generator
 
@@ -88,3 +88,21 @@ def init_db() -> None:
     Nếu cần migration → dùng Alembic (COULD — không cần cho MVP).
     """
     Base.metadata.create_all(bind=engine)
+
+    # Lightweight migration for MVP: add missing columns on existing SQLite DB.
+    # SQLite supports ALTER TABLE ... ADD COLUMN.
+    try:
+        with engine.begin() as conn:
+            # PRAGMA table_info returns rows: (cid, name, type, notnull, dflt_value, pk)
+            cols = conn.execute(text("PRAGMA table_info(outfits)")).fetchall()
+            col_names = {row[1] for row in cols}
+            if "gender" not in col_names:
+                conn.execute(
+                    text(
+                        "ALTER TABLE outfits "
+                        "ADD COLUMN gender VARCHAR(10) NOT NULL DEFAULT 'any'"
+                    )
+                )
+    except Exception:
+        # If DB is not SQLite or table not present yet, ignore.
+        pass

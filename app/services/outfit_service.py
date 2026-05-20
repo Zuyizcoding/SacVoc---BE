@@ -22,6 +22,8 @@ LƯU Ý:
   - KHÔNG cần FAISS hay vector DB — numpy đủ cho 80 items
   - Mặc định occasion="daily" nếu user chưa chọn
 """
+import hashlib
+
 import numpy as np
 from sqlalchemy.orm import Session
 
@@ -122,6 +124,7 @@ def build_outfit_query(
 def _load_outfit_vectors(
     db: Session,
     occasion: str | None = None,
+    gender: str | None = None,
 ) -> tuple[list[Outfit], np.ndarray]:
     """Load tất cả outfit có vector từ DB → numpy matrix.
 
@@ -139,6 +142,9 @@ def _load_outfit_vectors(
 
     if occasion:
         query = query.filter(Outfit.occasion == occasion)
+
+    if gender and gender != "any":
+        query = query.filter(Outfit.gender == gender)
 
     outfits = query.all()
 
@@ -195,6 +201,7 @@ def recommend_outfits(
     color_sub_season: str,
     body_shape: str,
     occasion: str = "daily",
+    gender: str = "any",
     top_k: int = 6,
     text_encoder=None,
 ) -> OutfitRecommendResponse:
@@ -234,13 +241,17 @@ def recommend_outfits(
         query_vector = query_vector.astype(np.float32)
         query_vector = query_vector / np.linalg.norm(query_vector)
     else:
-        # Fallback / Demo: tạo random vector (kết quả ngẫu nhiên nhưng app không crash)
-        rng = np.random.default_rng(seed=42)
+        # Fallback / Demo: tạo pseudo-random vector theo query_text.
+        # - Tránh seed cố định (kết quả luôn y hệt dù ảnh khác).
+        # - Vẫn deterministic theo (color_sub_season, body_shape, occasion).
+        seed_bytes = hashlib.sha256(query_text.encode("utf-8")).digest()[:8]
+        seed_int = int.from_bytes(seed_bytes, byteorder="little", signed=False)
+        rng = np.random.default_rng(seed=seed_int)
         query_vector = rng.standard_normal(512).astype(np.float32)
         query_vector = query_vector / np.linalg.norm(query_vector)
 
     # Bước 3: Load outfit vectors từ DB
-    outfits, outfit_matrix = _load_outfit_vectors(db, occasion=occasion)
+    outfits, outfit_matrix = _load_outfit_vectors(db, occasion=occasion, gender=gender)
 
     if len(outfits) == 0:
         # DB trống hoặc chưa encode — trả list rỗng

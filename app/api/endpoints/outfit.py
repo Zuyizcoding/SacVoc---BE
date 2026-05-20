@@ -64,6 +64,11 @@ async def get_outfit_recommendations(
         description="daily | work | party | date — mặc định daily",
         regex="^(daily|work|party|date)$",
     ),
+    gender: str = Query(
+        default="any",
+        description="any | male | female — optional filter để tránh trộn nam/nữ",
+        regex="^(any|male|female)$",
+    ),
     db: Session = Depends(get_db),
 ) -> ApiResponse[OutfitRecommendResponse]:
     """Gợi ý outfit dựa trên kết quả phân tích F1 + F2.
@@ -120,6 +125,7 @@ async def get_outfit_recommendations(
             color_sub_season=history.color_sub_season,
             body_shape=history.body_shape,
             occasion=occasion,
+            gender=gender,
             top_k=6,
             text_encoder=None,  # TODO: inject FashionCLIP khi deploy
         )

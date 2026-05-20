@@ -378,6 +378,13 @@ class GeminiClient:
                     "❌ Gemini quota/rate-limit (429): %s",
                     str(exc),
                 )
+
+                # Small backoff then retry if we still have attempts.
+                if attempt < settings.GEMINI_MAX_RETRIES:
+                    backoff = min(1.5 * attempt, 4.0) + random.uniform(0.0, 0.5)
+                    await asyncio.sleep(backoff)
+                    continue
+
                 _raise_ai_overloaded_http()
 
             except gapi_exceptions.InternalServerError as exc:
