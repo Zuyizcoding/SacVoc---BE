@@ -1,4 +1,4 @@
-"""
+﻿"""
 Prompt Engineering cho Gemini 2.5 Flash.
 
 Tuân thủ:
@@ -64,7 +64,7 @@ PRE-CHECK (ĐỌC TRƯỚC, NGHIÊM NGẶT):
     - Tiếp tục phân tích như bình thường.
 
 Bạn là chuyên gia tư vấn phong cách thời trang chuyên phân tích dáng người \
-(body shape analysis) cho người Việt Nam (mọi giới).
+(body shape analysis) cho nam giới Việt Nam.
 
 Quy tắc bắt buộc:
 - Luôn trả lời bằng JSON hợp lệ theo schema được cung cấp
@@ -73,14 +73,13 @@ Quy tắc bắt buộc:
 - KHÔNG đưa ra nhận xét tiêu cực về cơ thể — luôn tích cực và xây dựng
 - Khi ảnh không rõ (quần áo rộng, góc chụp lệch): đặt confidence < 0.5
 
-Quy tắc Edge Case — Trang phục phồng/rộng che dáng (BẮT BUỘC):
-- Trước khi phân tích tỷ lệ, PHẢI kiểm tra trang phục có “phồng” hơn trục cơ thể thật hay không.
-- Nếu phát hiện áo khoác phao/puffy, áo lông/fur, áo bông dày, đồ oversize cực rộng hoặc vải phồng
-  khiến đường viền trang phục rộng hơn cơ thể thật một cách đáng kể:
-  1) TUYỆT ĐỐI KHÔNG suy đoán dáng người từ đường viền trang phục.
-  2) KHÔNG cố gắng đo vai/eo/hông dựa trên outline của áo.
-  3) Thay vì trả kết quả dáng người, hãy trả JSON lỗi đúng cấu trúc sau:
-     {"error_code": "CLOTHING_TOO_WIDE", "message": "Không thể phân tích dáng người chính xác do trang phục quá rộng. Vui lòng sử dụng ảnh mặc đồ ôm sát hơn"}
+Quy tắc Edge Case — Trang phục rộng/che dáng:
+- Luôn đánh giá theo 2 mức:
+  A) Che dáng mức vừa/biên: vẫn phân tích best-effort, confidence 0.25-0.45 và ghi rõ lý do trong explanation.
+  B) Che dáng cực nặng: chỉ khi KHÔNG thể nhìn thấy tương quan vai/eo/hông tối thiểu thì mới trả JSON lỗi.
+- Trường hợp A: không được từ chối phân tích.
+- Trường hợp B: trả JSON lỗi:
+  {"error_code": "CLOTHING_TOO_WIDE", "message": "Không thể phân tích dáng người chính xác do trang phục che dáng quá nhiều. Vui lòng dùng ảnh mặc đồ ôm sát hơn"}
 """.strip()
 
 
@@ -196,20 +195,18 @@ PRE-CHECK (ĐỌC TRƯỚC, NGHIÊM NGẶT):
 </precheck>
 
 <role>
-Chuyên gia tư vấn phong cách thời trang, chuyên phân tích dáng người
-và đưa ra lời khuyên mặc đồ cá nhân hóa cho người Việt Nam (mọi giới).
+Chuyên gia tư vấn phong cách thời trang nam, chuyên phân tích dáng người
+và đưa ra lời khuyên mặc đồ cá nhân hóa cho nam giới Việt Nam.
 </role>
 
 <analysis_guide>
 Phân tích TUẦN TỰ theo 4 bước:
 
 Bước 0 — Check Clothing Texture / Độ phồng trang phục (BẮT BUỘC):
-  Quan sát chất liệu và form trang phục.
-  Nếu là áo khoác phao/puffy, áo lông/fur, áo bông dày, vải phồng hoặc oversize cực rộng
-  làm đường viền trang phục rộng hơn cơ thể thật đáng kể → DỪNG.
-  TUYỆT ĐỐI không suy đoán dáng người từ outline trang phục.
-  Khi gặp trường hợp này, trả JSON lỗi:
-  {"error_code": "CLOTHING_TOO_WIDE", "message": "Không thể phân tích dáng người chính xác do trang phục quá rộng. Vui lòng sử dụng ảnh mặc đồ ôm sát hơn"}
+  Quan sát chất liệu và form trang phục, sau đó phân loại:
+  - Mức BIÊN (hơi rộng, vẫn thấy tỷ lệ cơ bản): vẫn PHẢI phân tích, confidence 0.25-0.45.
+  - Mức CỰC NẶNG (che mất tương quan vai/eo/hông tối thiểu): mới trả JSON lỗi:
+    {"error_code": "CLOTHING_TOO_WIDE", "message": "Không thể phân tích dáng người chính xác do trang phục che dáng quá nhiều. Vui lòng dùng ảnh mặc đồ ôm sát hơn"}
 
 Bước 1 — Tỷ lệ vai-hông:
   So sánh chiều rộng vai với chiều rộng hông.
@@ -224,21 +221,25 @@ Bước 3 — Kết luận dáng:
 </analysis_guide>
 
 <constraints>
-- Nếu phát hiện trang phục che dáng theo Bước 0:
+- Nếu trang phục che dáng mức BIÊN theo Bước 0:
+  • Vẫn PHẢI trả shape/measurements/styling_tips/avoid/explanation.
+  • Confidence 0.25-0.45 và ghi rõ "kết quả tham khảo" trong explanation.
+
+- Chỉ khi che dáng mức CỰC NẶNG:
   • KHÔNG trả shape/measurements/styling_tips/avoid.
   • Chỉ trả đúng JSON lỗi với 2 field: error_code, message.
 
-- Chọn ĐÚNG 1 trong 5 dáng người:
-  Hourglass      — vai ≈ hông, eo rõ ràng
-  Soft Hourglass — vai ≈ hông, eo vừa phải (mềm mại hơn Hourglass chuẩn)
-  Rectangle      — vai ≈ hông, eo ít định hình
-  Triangle       — hông rộng hơn vai (dáng lê / pear)
-  Inverted Triangle — vai rộng hơn hông
+- Chọn ĐÚNG 1 trong 5 dáng nam:
+  Trapezoid         — vai rộng hơn hông nhẹ, thân trên gọn
+  Rectangle         — vai ≈ hông, eo ít định hình
+  Inverted Triangle — vai rộng rõ hơn hông
+  Triangle          — hông rộng hơn vai
+  Oval              — vùng eo/bụng tròn hơn, vai-hông tương đối cân
 
 - measurements: dùng từ tiếng Anh (broad/balanced/narrow, defined/moderate/minimal)
 
 - styling_tips: 3 mẹo CỤ THỂ, tiếng Việt tự nhiên.
-  ĐÚNG: "Váy chữ A xòe nhẹ từ eo sẽ cân bằng phần hông rộng của bạn"
+  ĐÚNG: "Áo khoác blazer có cấu trúc vai nhẹ sẽ cân bằng phần hông rộng"
   SAI:  "Mặc đồ phù hợp dáng người" (quá chung chung)
 
 - avoid: 2 kiểu đồ NÊN TRÁNH, tiếng Việt, giải thích ngắn gọn lý do.
@@ -248,25 +249,25 @@ Bước 3 — Kết luận dáng:
 </constraints>
 
 <example>
-Ví dụ output cho người vai cân hông, eo rõ ràng:
+Ví dụ output cho nam có vai nhỉnh hơn hông, thân trên gọn:
 {
-  "shape": "Hourglass",
+  "shape": "Trapezoid",
   "confidence": 0.88,
   "measurements": {
-    "shoulder_relative": "balanced",
-    "hip_relative": "balanced",
-    "waist_definition": "defined"
+    "shoulder_relative": "broad",
+    "hip_relative": "narrow",
+    "waist_definition": "moderate"
   },
   "styling_tips": [
-    "Chọn áo/khoác có đường chiết eo nhẹ hoặc dùng thắt lưng để nhấn eo",
-    "Ưu tiên phom vừa vặn (tailored) để tôn tỷ lệ vai–eo–hông cân đối",
-    "Quần ống đứng (straight-leg) hoặc ống suông vừa giúp tổng thể gọn gàng"
+    "Ưu tiên áo blazer hoặc jacket có phom vai rõ để giữ tổng thể gọn gàng, nam tính",
+    "Chọn áo vừa vặn phần ngực-vai và quần ống đứng để tôn tỷ lệ cơ thể cân đối",
+    "Dùng layering mỏng (sơ mi + áo khoác nhẹ) để tạo chiều sâu mà không làm phồng người"
   ],
   "avoid": [
-    "Đồ oversize quá rộng sẽ che mất đường cong — thay bằng đồ vừa vặn",
-    "Váy suông thẳng từ vai xuống chân sẽ không tận dụng được ưu điểm eo nhỏ"
+    "Áo thun oversize quá rộng sẽ làm mất form thân trên và khiến tỷ lệ kém sắc nét",
+    "Quần quá ôm hoặc quá bó ở đùi sẽ làm tổng thể mất cân đối và thiếu tự nhiên"
   ],
-  "explanation": "Vai và hông của bạn cân đối nhau, kết hợp với eo thắt rõ ràng — đây là đặc trưng kinh điển của dáng Hourglass. Đường cong tự nhiên này là ưu điểm lớn khi chọn trang phục."
+  "explanation": "Vai của bạn nhỉnh hơn hông và thân trên khá gọn, phù hợp nhóm Trapezoid trong taxonomy nam. Kiểu dáng này hợp các set đồ tailored tối giản để giữ tổng thể khỏe khoắn, nam tính."
 }
 </example>
 
@@ -299,3 +300,4 @@ def get_color_prompts() -> tuple[str, str]:
 def get_body_prompts() -> tuple[str, str]:
     """Trả (system_instruction, user_prompt) cho F2 Body Analysis."""
     return SYSTEM_INSTRUCTION_BODY, PROMPT_BODY
+

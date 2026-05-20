@@ -1,4 +1,4 @@
-"""
+﻿"""
 F3 Router — Outfit Recommendation API.
 
 Tuân thủ:
@@ -65,9 +65,9 @@ async def get_outfit_recommendations(
         regex="^(daily|work|party|date)$",
     ),
     gender: str = Query(
-        default="any",
-        description="any | male | female — optional filter để tránh trộn nam/nữ",
-        regex="^(any|male|female)$",
+        default="male",
+        description="Male-only mode: chỉ hỗ trợ giá trị 'male'.",
+        regex="^male$",
     ),
     db: Session = Depends(get_db),
 ) -> ApiResponse[OutfitRecommendResponse]:
@@ -120,12 +120,15 @@ async def get_outfit_recommendations(
 
     # ─── Bước 3: Gọi Outfit Service ───
     try:
+        # Male-only patch: always lock gender filter to male.
+        effective_gender = "male"
+
         result = recommend_outfits(
             db=db,
             color_sub_season=history.color_sub_season,
             body_shape=history.body_shape,
             occasion=occasion,
-            gender=gender,
+            gender=effective_gender,
             top_k=6,
         )
 
@@ -192,3 +195,4 @@ async def get_outfit_detail(
     )
 
     return ApiResponse(success=True, data=detail)
+

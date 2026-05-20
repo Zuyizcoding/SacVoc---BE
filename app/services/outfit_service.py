@@ -28,6 +28,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -205,20 +206,34 @@ SEASON_KEYWORDS: dict[str, str] = {
 # Body shape → silhouette keywords cho FashionCLIP hiểu
 # SHOULD Extended Query: thêm silhouette-specific terms
 BODY_KEYWORDS: dict[str, str] = {
-    "Hourglass":          "tailored fitted waist cinched belted wrap structured",
-    "Soft Hourglass":     "soft tailored draping relaxed fitted waist gentle curves",
-    "Rectangle":          "structured layered overshirt jacket belt contrast volume",
-    "Triangle":           "balance upper body structured shoulders jacket crew neck",
-    "Inverted Triangle":  "V-neck straight leg wide leg balance lower body",
+    "Trapezoid":          "menswear tailored fit clean shoulder line structured blazer tapered chinos",
+    "Rectangle":          "layered menswear overshirt bomber trucker jacket straight fit trousers",
+    "Inverted Triangle":  "menswear V-neck raglan top straight leg wide leg balance lower body",
+    "Triangle":           "menswear structured shoulder jacket crew neck darker top lighter bottom",
+    "Oval":               "menswear vertical line outfit open layer mid-rise straight leg clean minimal",
 }
 
 # Occasion → style keywords
 OCCASION_KEYWORDS: dict[str, str] = {
-    "daily":  "casual everyday comfortable relaxed streetwear",
-    "work":   "office professional formal blazer tailored",
-    "party":  "evening glamorous sparkle sequin cocktail",
-    "date":   "romantic elegant chic smart casual",
+    "daily":  "mens casual everyday comfortable relaxed streetwear",
+    "work":   "mens office professional business casual blazer chinos loafers",
+    "party":  "mens evening smart casual sharp clean dark tonal outfit",
+    "date":   "mens date night smart casual polished minimal style",
 }
+
+
+def _canonicalize_body_shape_male(shape: str) -> str:
+    raw = str(shape or "").strip().lower()
+    aliases = {
+        "trapezoid": "Trapezoid",
+        "hourglass": "Trapezoid",
+        "soft hourglass": "Trapezoid",
+        "rectangle": "Rectangle",
+        "inverted triangle": "Inverted Triangle",
+        "triangle": "Triangle",
+        "oval": "Oval",
+    }
+    return aliases.get(raw, str(shape).strip())
 
 
 def build_outfit_query(
@@ -254,12 +269,13 @@ def build_outfit_query(
     """
     # Lookup keywords — fallback nếu không tìm thấy
     season_kw = SEASON_KEYWORDS.get(color_sub_season, "fashionable stylish")
-    body_kw = BODY_KEYWORDS.get(body_shape, "flattering well-fitted")
+    canonical_shape = _canonicalize_body_shape_male(body_shape)
+    body_kw = BODY_KEYWORDS.get(canonical_shape, "menswear flattering well-fitted")
     occasion_kw = OCCASION_KEYWORDS.get(occasion, "casual everyday")
 
     # Template query — format tối ưu cho FashionCLIP
     query = (
-        f"A {season_kw} outfit for "
+        f"A men's {season_kw} outfit for "
         f"{body_kw} body type, "
         f"{occasion_kw} style"
     )
@@ -293,8 +309,9 @@ def _load_outfit_vectors(
     if occasion:
         query = query.filter(Outfit.occasion == occasion)
 
-    if gender and gender != "any":
-        query = query.filter(Outfit.gender == gender)
+    # Male-only mode: always filter by male aliases regardless of caller input.
+    aliases = ("male", "m", "nam", "man", "men")
+    query = query.filter(func.lower(Outfit.gender).in_(aliases))
 
     outfits = query.all()
 
@@ -351,7 +368,7 @@ def recommend_outfits(
     color_sub_season: str,
     body_shape: str,
     occasion: str = "daily",
-    gender: str = "any",
+    gender: str = "male",
     top_k: int = 6,
     text_encoder=None,
 ) -> OutfitRecommendResponse:
