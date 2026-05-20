@@ -351,13 +351,20 @@ class GeminiClient:
                 return validated.model_dump()
 
             except (ResourceExhausted, TooManyRequests) as exc:
-                # Quota exceeded / rate limited (HTTP 429) → không retry.
+                # Quota exceeded / rate limited (HTTP 429)
                 last_exception = exc
                 self._breaker.record_error()
                 logger.warning(
                     "❌ Gemini quota/rate-limit (429): %s",
                     str(exc),
                 )
+
+                # Small backoff then retry if we still have attempts.
+                if attempt < settings.GEMINI_MAX_RETRIES:
+                    backoff = min(1.5 * attempt, 4.0) + random.uniform(0.0, 0.5)
+                    await asyncio.sleep(backoff)
+                    continue
+
                 _raise_ai_overloaded_http()
 
             except InternalServerError as exc:

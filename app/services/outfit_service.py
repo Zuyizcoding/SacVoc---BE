@@ -22,6 +22,8 @@ LƯU Ý:
   - KHÔNG cần FAISS hay vector DB — numpy đủ cho 80 items
   - Mặc định occasion="daily" nếu user chưa chọn
 """
+import hashlib
+
 import numpy as np
 from sqlalchemy.orm import Session
 
@@ -239,8 +241,12 @@ def recommend_outfits(
         query_vector = query_vector.astype(np.float32)
         query_vector = query_vector / np.linalg.norm(query_vector)
     else:
-        # Fallback / Demo: tạo random vector (kết quả ngẫu nhiên nhưng app không crash)
-        rng = np.random.default_rng(seed=42)
+        # Fallback / Demo: tạo pseudo-random vector theo query_text.
+        # - Tránh seed cố định (kết quả luôn y hệt dù ảnh khác).
+        # - Vẫn deterministic theo (color_sub_season, body_shape, occasion).
+        seed_bytes = hashlib.sha256(query_text.encode("utf-8")).digest()[:8]
+        seed_int = int.from_bytes(seed_bytes, byteorder="little", signed=False)
+        rng = np.random.default_rng(seed=seed_int)
         query_vector = rng.standard_normal(512).astype(np.float32)
         query_vector = query_vector / np.linalg.norm(query_vector)
 
