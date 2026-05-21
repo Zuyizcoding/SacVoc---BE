@@ -16,6 +16,7 @@ from app.services.outfit_service import (
     SEASON_KEYWORDS,
     build_outfit_query,
 )
+from app.utils.fashion_clip_compat import load_fashion_clip
 
 
 EMBEDDING_SCHEMA_VERSION = "2026-05-mens-v1"
@@ -57,10 +58,8 @@ def encode_queries() -> None:
     text_embeddings = None
 
     try:
-        from fashion_clip.fashion_clip import FashionCLIP
-
         print("Loading FashionCLIP...")
-        fclip = FashionCLIP("fashion-clip")
+        fclip = load_fashion_clip("fashion-clip")
         print(f"Encoding {len(queries)} queries with FashionCLIP...")
         text_embeddings = fclip.encode_text(queries, batch_size=32)
         meta = {

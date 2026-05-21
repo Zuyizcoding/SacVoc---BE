@@ -1,8 +1,8 @@
 {
-  "backend": "hf_clip",
-  "model": "openai/clip-vit-base-patch32",
+  "backend": "fashion_clip",
+  "model": "fashion-clip",
   "version": "2026-05-mens-v1",
   "encoded_outfits": 40,
   "requested_outfits": 40,
-  "generated_at": "2026-05-20T16:47:13.660030+00:00"
+  "generated_at": "2026-05-21T07:25:17.777848+00:00"
 }

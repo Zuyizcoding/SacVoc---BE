@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.models import Outfit
+from app.utils.fashion_clip_compat import load_fashion_clip
 from app.schemas.outfit import OutfitItem, OutfitRecommendResponse
 
 logger = logging.getLogger(__name__)
@@ -55,9 +56,7 @@ class RuntimeFashionClipTextEncoder:
         self._processor = None
 
         try:
-            from fashion_clip.fashion_clip import FashionCLIP
-
-            self._model = FashionCLIP(model_name)
+            self._model = load_fashion_clip(model_name)
             self._backend = "fashion_clip"
             return
         except Exception as exc:

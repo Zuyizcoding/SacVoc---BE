@@ -9,6 +9,7 @@
 # Lưu ý FashionCLIP:
 # - Chỉ cần khi chạy scripts/encode_outfits.py (encode vectors offline)
 # - Có thể kéo theo các dependency nặng (torch/transformers) tùy platform
+# - fashion-clip 0.2.2 + transformers 5.x: dùng app.utils.fashion_clip_compat (đã có trong repo)
 # ════════════════════════════════════════════════════
 
 # FashionCLIP — encode outfit vectors offline, chạy 1 lần

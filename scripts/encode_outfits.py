@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.db.database import SessionLocal, init_db
 from app.db.models import Outfit
+from app.utils.fashion_clip_compat import load_fashion_clip
 
 
 EMBEDDING_SCHEMA_VERSION = "2026-05-mens-v1"
@@ -91,10 +92,8 @@ def _to_numpy_features(raw, projection_layer=None) -> np.ndarray:
 def _build_image_encoder():
     """Create real image encoder: prefer FashionCLIP, fallback to HF CLIP."""
     try:
-        from fashion_clip.fashion_clip import FashionCLIP
-
         print("Loading FashionCLIP model...")
-        fclip = FashionCLIP("fashion-clip")
+        fclip = load_fashion_clip("fashion-clip")
         print("Model loaded (backend=fashion_clip)")
 
         def _encode(image: Image.Image) -> np.ndarray:
