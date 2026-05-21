@@ -27,7 +27,7 @@ import google.generativeai as genai
 from fastapi import HTTPException
 from google.api_core import exceptions as gapi_exceptions
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from app.core.config import settings
 
@@ -35,8 +35,18 @@ logger = logging.getLogger(__name__)
 
 
 AI_OVERLOADED_DETAIL = (
-    "Hệ thống AI đang quá tải hoặc hết lượt sử dụng. Vui lòng thử lại sau!"
+    "Hệ thống AI đang quá tải hoặc đã chạm giới hạn free tier. "
+    "Vui lòng thử lại sau khoảng 30-60 giây."
 )
+
+AI_INVALID_RESPONSE_DETAIL = (
+    "AI phản hồi chưa đầy đủ hoặc sai định dạng. "
+    "Vui lòng thử lại sau vài giây."
+)
+
+
+class GeminiInvalidResponseError(ValueError):
+    """Gemini returned partial or invalid structured output."""
 
 
 def _raise_ai_overloaded_http() -> None:
@@ -325,7 +335,7 @@ class GeminiClient:
 
         Raises:
             HTTPException: 429 khi Gemini bị quota/overload hoặc circuit breaker mở.
-            ValueError: Khi Gemini không trả JSON hợp lệ.
+            GeminiInvalidResponseError: Khi Gemini trả structured output không đầy đủ/hợp lệ.
         """
         # --- Circuit Breaker check (Tính năng #13) ---
         if self._breaker.is_open:
@@ -355,11 +365,21 @@ class GeminiClient:
                     request_options={"timeout": settings.GEMINI_TIMEOUT},
                 )
 
-                # Parse response
-                result = parse_gemini_json(response.text)
-
-                # Validate bằng Pydantic schema
-                validated = response_schema.model_validate(result)
+                try:
+                    result = parse_gemini_json(response.text)
+                    validated = response_schema.model_validate(result)
+                except (ValueError, ValidationError) as exc:
+                    logger.warning(
+                        "⚠️ Gemini attempt %d/%d returned invalid structured data: %s",
+                        attempt,
+                        settings.GEMINI_MAX_RETRIES,
+                        str(exc),
+                    )
+                    if attempt < settings.GEMINI_MAX_RETRIES:
+                        backoff = min(0.75 * attempt, 1.5) + random.uniform(0.0, 0.25)
+                        await asyncio.sleep(backoff)
+                        continue
+                    raise GeminiInvalidResponseError(AI_INVALID_RESPONSE_DETAIL) from exc
 
                 # Ghi nhận thành công — reset circuit breaker
                 self._breaker.record_success()
@@ -429,10 +449,14 @@ class GeminiClient:
                     continue
                 _raise_ai_overloaded_http()
 
+            except GeminiInvalidResponseError:
+                raise
+
             except Exception as exc:
                 last_exception = exc
-                self._breaker.record_error()
                 is_retryable = self._is_retryable_error(exc)
+                if is_retryable:
+                    self._breaker.record_error()
                 logger.warning(
                     "❌ Gemini attempt %d/%d failed (retryable=%s): %s",
                     attempt,

@@ -114,7 +114,7 @@ def _coerce_measurements(value: object, *, shape: str | None) -> dict[str, str] 
     - free-form string (e.g. "Vai rộng hơn hông...")
     """
     if value is None:
-        return _default_measurements_by_shape(shape)
+        return None
 
     if isinstance(value, dict):
         shoulder = value.get("shoulder_relative") or value.get("shoulder")
@@ -126,9 +126,6 @@ def _coerce_measurements(value: object, *, shape: str | None) -> dict[str, str] 
                 "hip_relative": str(hip).strip().lower(),
                 "waist_definition": str(waist).strip().lower(),
             }
-        fallback = _default_measurements_by_shape(shape)
-        if fallback:
-            return fallback
         return None
 
     if isinstance(value, str):
@@ -155,9 +152,6 @@ def _coerce_measurements(value: object, *, shape: str | None) -> dict[str, str] 
             "waist_definition": waist_definition,
         }
 
-    fallback = _default_measurements_by_shape(shape)
-    if fallback:
-        return fallback
     return None
 
 
@@ -280,6 +274,8 @@ class BodyApiResponse(BaseModel):
     """Response trả về cho Flutter."""
     shape: str
     confidence: float
+    photo_quality_score: float | None = None
+    photo_quality_band: str | None = None
     measurements: BodyMeasurements
     styling_tips: list[str]
     avoid: list[str]

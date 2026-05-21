@@ -14,13 +14,22 @@ class OutfitItem(BaseModel):
     shopee_url: str
     price_range: str
     score: float = Field(
-        description="Cosine similarity score 0.0-1.0"
+        description="Final reranked score 0.0-1.0"
+    )
+    retrieval_score: float | None = Field(
+        default=None,
+        description="Raw semantic similarity before reranking"
+    )
+    reason_tags: list[str] | None = Field(
+        default=None,
+        description="Short rule tags explaining why this outfit ranked well"
     )
 
 
 class OutfitRecommendResponse(BaseModel):
     """Response cho GET /api/v1/outfits/recommend — top 6 outfit."""
     query_used: str               # Text query gửi vào FashionCLIP
+    query_source: str | None = None
     outfits: list[OutfitItem]     # Top-6 outfit theo cosine similarity
 
 

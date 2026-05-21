@@ -20,6 +20,8 @@ FLOW:
     → Nếu đủ → gọi outfit_service.recommend_outfits()
     → Trả ApiResponse[OutfitRecommendResponse]
 """
+import json
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -36,6 +38,19 @@ from app.services.outfit_service import RecommendationNotReadyError, recommend_o
 
 
 router = APIRouter()
+
+
+def _extract_photo_quality_score(result_json: str | None) -> float | None:
+    if not result_json:
+        return None
+    try:
+        payload = json.loads(result_json)
+    except Exception:
+        return None
+    raw = payload.get("photo_quality_score")
+    if not isinstance(raw, (int, float)):
+        return None
+    return max(0.0, min(float(raw), 1.0))
 
 
 # ═══════════════════════════════════════════════
@@ -130,6 +145,10 @@ async def get_outfit_recommendations(
             occasion=occasion,
             gender=effective_gender,
             top_k=6,
+            color_confidence=history.color_confidence,
+            body_confidence=history.body_confidence,
+            color_photo_quality_score=_extract_photo_quality_score(history.color_result_json),
+            body_photo_quality_score=_extract_photo_quality_score(history.body_result_json),
         )
 
         return ApiResponse(success=True, data=result)
@@ -139,7 +158,7 @@ async def get_outfit_recommendations(
             success=False,
             data=None,
             error=str(exc),
-            error_code=503,
+            error_code="RECOMMENDATION_NOT_READY",
         )
 
     except Exception as e:

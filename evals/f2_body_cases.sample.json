@@ -1,0 +1,14 @@
+[
+  {
+    "case_id": "f2-rectangle-001",
+    "image_path": "benchmarks/images/body/sample_rectangle_001.jpg",
+    "expected_shape": "Rectangle",
+    "notes": "Vai và hông cân bằng, eo ít định hình"
+  },
+  {
+    "case_id": "f2-inverted-triangle-001",
+    "image_path": "benchmarks/images/body/sample_inverted_triangle_001.jpg",
+    "expected_shape": "Inverted Triangle",
+    "notes": "Vai rộng rõ hơn hông"
+  }
+]

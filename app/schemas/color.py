@@ -2,9 +2,9 @@
 Pydantic schemas cho F1 — Phân tích màu sắc cá nhân.
 Tuân thủ: backend-python #3 — Type Hints cho mọi field.
 
-LƯU Ý: ColorGeminiResponse là schema truyền vào Gemini `response_schema`
-        (Tính năng #11 — Structured Output). Gemini SẼ trả đúng format này.
-        ColorApiResponse là schema trả về cho Flutter client.
+LƯU Ý:
+- ColorInferenceResponse là schema mỏng truyền vào Gemini `response_schema`.
+- Backend sẽ enrich thêm palette/makeup/menswear trước khi trả ColorApiResponse.
 """
 from pydantic import BaseModel, Field
 from pydantic import model_validator
@@ -17,15 +17,22 @@ class MakeupGuide(BaseModel):
     hair: list[str] = Field(description="2-3 màu tóc phù hợp")
 
 
-class ColorGeminiResponse(BaseModel):
-    """Schema ép Gemini trả đúng JSON (Tính năng #11).
-    Truyền vào `generation_config.response_schema`.
-    """
+class MenswearGuide(BaseModel):
+    """Quick styling directions for male-focused color output."""
+    tops: list[str] = Field(description="3 nhóm màu áo hoặc layer nên ưu tiên")
+    bottoms: list[str] = Field(description="3 nhóm màu quần nên phối dễ nhất")
+    accessories: list[str] = Field(description="2-3 gợi ý phụ kiện/kim loại phù hợp")
+
+
+class ColorInferenceResponse(BaseModel):
+    """Schema mỏng cho Gemini: chỉ giữ các field cốt lõi cần suy luận."""
+
     # Edge-case: multiple people detected -> return a structured error.
     error_code: str | None = Field(
         default=None,
         description=(
-            "Nếu phát hiện nhiều người trong ảnh: 'MULTIPLE_PEOPLE_DETECTED'. "
+            "Nếu phát hiện nhiều người hoặc không có người trong ảnh: "
+            "'MULTIPLE_PEOPLE_DETECTED' / 'NO_PERSON_DETECTED'. "
             "Nếu phân tích bình thường: null/không có."
         ),
     )
@@ -43,21 +50,37 @@ class ColorGeminiResponse(BaseModel):
             "Deep Winter, True Winter, Bright Winter"
         ),
     )
-    primary_season: str | None = Field(
-        default=None,
-        description="Spring | Summer | Autumn | Winter",
-    )
     confidence: float | None = Field(
         default=None,
         ge=0.0,
         le=1.0,
         description="Mức tự tin 0.0-1.0",
     )
-    secondary_season: str | None = Field(default=None, description="Sub-season thứ 2 có thể")
+    secondary_season: str | None = Field(
+        default=None,
+        description="Sub-season thứ 2 có thể, nếu không chắc có thể bỏ trống",
+    )
     explanation: str | None = Field(default=None, description="2-3 câu tiếng Việt giải thích lý do")
-    palette: list[str] | None = Field(default=None, description="6 mã hex (#RRGGBB)")
-    makeup: MakeupGuide | None = None
-    advice: str | None = Field(default=None, description="1 câu lời khuyên ngắn gọn tiếng Việt")
+    advice: str | None = Field(
+        default=None,
+        description="1-2 câu lời khuyên ngắn gọn tiếng Việt, ưu tiên trang phục nam",
+    )
+    primary_season: str | None = Field(
+        default=None,
+        description="Legacy optional field - backend có thể tự tính từ sub_season",
+    )
+    palette: list[str] | None = Field(
+        default=None,
+        description="Legacy optional field - backend sẽ override nếu Gemini trả thiếu",
+    )
+    makeup: MakeupGuide | None = Field(
+        default=None,
+        description="Legacy optional field - backend sẽ override từ season_data",
+    )
+    menswear: MenswearGuide | None = Field(
+        default=None,
+        description="Legacy optional field - backend sẽ override từ season_data",
+    )
 
     @model_validator(mode="after")
     def _validate_either_error_or_success(self):
@@ -67,29 +90,15 @@ class ColorGeminiResponse(BaseModel):
                 raise ValueError("message is required when error_code is set")
             return self
 
-        # Success path: require all normal fields
-        missing = []
+        # Success path: require only the irreducible field from Gemini.
         if not self.sub_season:
-            missing.append("sub_season")
-        if not self.primary_season:
-            missing.append("primary_season")
-        if self.confidence is None:
-            missing.append("confidence")
-        if not self.secondary_season:
-            missing.append("secondary_season")
-        if not self.explanation:
-            missing.append("explanation")
-        if not self.palette:
-            missing.append("palette")
-        if self.makeup is None:
-            missing.append("makeup")
-        if not self.advice:
-            missing.append("advice")
-
-        if missing:
-            raise ValueError(f"Missing required fields for successful analysis: {', '.join(missing)}")
+            raise ValueError("Missing required fields for successful analysis: sub_season")
 
         return self
+
+
+class ColorGeminiResponse(ColorInferenceResponse):
+    """Backward-compatible alias for older imports/tests."""
 
 
 class ColorApiResponse(BaseModel):
@@ -97,8 +106,11 @@ class ColorApiResponse(BaseModel):
     sub_season: str
     primary_season: str
     confidence: float
+    photo_quality_score: float | None = None
+    photo_quality_band: str | None = None
     secondary_season: str
     explanation: str
     palette: list[str]       # 6 hex — override từ season_data.py (Tính năng #20)
     makeup: MakeupGuide
     advice: str
+    menswear: MenswearGuide | None = None

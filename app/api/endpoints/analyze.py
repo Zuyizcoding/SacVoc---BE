@@ -1,21 +1,21 @@
 ﻿"""
-Router phÃ¢n tÃ­ch áº£nh â€” Color (F1) + Body (F2).
+Router phân tích ảnh cho Color (F1) + Body (F2).
 
-TuÃ¢n thá»§:
-  - backend-python #1: Router riÃªng biá»‡t cho /analyze
+Tuân thủ:
+  - backend-python #1: Router riêng biệt cho /analyze
   - backend-python #2: Depends() inject GeminiClient + DB Session
-  - TÃ­nh nÄƒng #9: try/finally xÃ³a áº£nh táº¡m â€” KHÃ”NG lÆ°u áº£nh ngÆ°á»i dÃ¹ng
-  - TÃ­nh nÄƒng #34: HTTP 503/422/429/400 â†’ thÃ´ng bÃ¡o tiáº¿ng Viá»‡t rÃµ rÃ ng
-  - TÃ­nh nÄƒng #15: F1+F2â†’F3 combined flow â€” Ä‘á»c káº¿t quáº£ tá»« DB
+  - Tính năng #9: try/finally xóa ảnh tạm - KHÔNG lưu ảnh người dùng
+  - Tính năng #34: HTTP 503/422/429/400 -> thông báo tiếng Việt rõ ràng
+  - Tính năng #15: F1+F2->F3 combined flow - đọc kết quả từ DB
 
-Luá»“ng xá»­ lÃ½:
-  1. Nháº­n áº£nh upload (UploadFile)
-  2. Validate kÃ­ch thÆ°á»›c (â‰¥400Ã—400px)
-  3. Compress (â‰¤1MB JPEG)
-  4. Gá»­i Gemini qua GeminiClient
-  5. Override palette tá»« season_data.py (F1)
-  6. LÆ°u káº¿t quáº£ vÃ o ANALYSIS_HISTORY
-  7. finally: XÃ“A áº£nh táº¡m (dÃ¹ thÃ nh cÃ´ng hay tháº¥t báº¡i)
+Luồng xử lý:
+  1. Nhận ảnh upload (UploadFile)
+  2. Validate kích thước (>=400x400px)
+  3. Compress (<=1MB JPEG)
+  4. Gửi Gemini qua GeminiClient
+  5. Override palette từ season_data.py (F1)
+  6. Lưu kết quả vào ANALYSIS_HISTORY
+  7. finally: Xóa ảnh tạm (dù thành công hay thất bại)
 """
 import os
 import logging
@@ -27,10 +27,14 @@ from google.api_core.exceptions import DeadlineExceeded
 from sqlalchemy.orm import Session
 
 from app.schemas.base import ApiResponse
-from app.schemas.color import ColorApiResponse, ColorGeminiResponse
+from app.schemas.color import ColorApiResponse, ColorInferenceResponse
 from app.schemas.body import BodyApiResponse, BodyGeminiResponse
 from app.core.prompts import get_body_prompts, get_color_prompts
-from app.services.gemini_client import GeminiClient, get_gemini_client
+from app.services.gemini_client import (
+    GeminiClient,
+    GeminiInvalidResponseError,
+    get_gemini_client,
+)
 from app.schemas.history import HistoryApiResponse
 from app.utils.image_utils import preprocess_image_for_ai
 from app.db.database import get_db
@@ -38,15 +42,39 @@ from app.db.crud import get_analysis, save_color_result, save_body_result
 from app.data.season_data import (
     canonicalize_sub_season,
     get_season_entry,
+    get_menswear_recommendation,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/analyze", tags=["Analysis"])
 
+ERROR_CODE_PHOTO_UNREADABLE = "PHOTO_UNREADABLE"
+ERROR_CODE_PHOTO_TOO_SMALL = "PHOTO_TOO_SMALL"
+ERROR_CODE_PHOTO_TOO_FAR = "PHOTO_TOO_FAR"
+ERROR_CODE_NO_PERSON = "NO_PERSON_DETECTED"
+ERROR_CODE_MULTIPLE_PEOPLE = "MULTIPLE_PEOPLE_DETECTED"
+ERROR_CODE_CLOTHING_TOO_WIDE = "CLOTHING_TOO_WIDE"
+ERROR_CODE_AI_INCOMPLETE = "AI_INCOMPLETE"
+ERROR_CODE_AI_OVERLOADED = "AI_OVERLOADED"
+ERROR_CODE_AI_INVALID_RESULT = "AI_INVALID_RESULT"
+ERROR_CODE_ANALYSIS_FAILED = "ANALYSIS_FAILED"
+
+
+def _typed_error_detail(message: str, error_code: str) -> dict[str, str]:
+    return {"error_code": error_code, "message": message}
+
+
+def _raise_typed_http(status_code: int, message: str, error_code: str) -> None:
+    raise HTTPException(status_code=status_code, detail=_typed_error_detail(message, error_code))
+
+
+def _api_error_response(message: str, error_code: str) -> ApiResponse[None]:
+    return ApiResponse(success=False, data=None, error=message, error_code=error_code)
+
 
 def _canonicalize_color_result(result: dict) -> dict:
-    """Chuáº©n hÃ³a F1 báº±ng báº£ng season_data trÆ°á»›c khi lÆ°u/tráº£ vá»."""
+    """Chuẩn hóa F1 bằng bảng season_data trước khi lưu/trả về."""
     sub_season_raw = str(result.get("sub_season") or "").strip()
     canonical_sub_season = canonicalize_sub_season(sub_season_raw)
     if canonical_sub_season is None:
@@ -57,11 +85,12 @@ def _canonicalize_color_result(result: dict) -> dict:
     result["primary_season"] = entry["primary"]
     result["palette"] = entry["palette"]
     result["makeup"] = entry["makeup"]
+    result["menswear"] = get_menswear_recommendation(canonical_sub_season)
     return result
 
 
 def _merge_body_result(base: dict, patch: dict) -> dict:
-    """Merge partial F2 payloads, Æ°u tiÃªn dá»¯ liá»‡u má»›i khi field cÃ³ giÃ¡ trá»‹."""
+    """Merge partial F2 payloads, ưu tiên dữ liệu mới khi field có giá trị."""
     merged = dict(base)
     for key, value in patch.items():
         if value is None:
@@ -74,17 +103,121 @@ def _merge_body_result(base: dict, patch: dict) -> dict:
     return merged
 
 
-def _build_body_completion_prompt(missing_fields: list[str], partial_result: dict) -> str:
-    """Prompt ngáº¯n Ä‘á»ƒ yÃªu cáº§u Gemini chá»‰ hoÃ n thiá»‡n field F2 cÃ²n thiáº¿u."""
+def _merge_color_result(base: dict, patch: dict) -> dict:
+    """Merge partial F1 payloads, giữ field cũ khi patch vẫn trống."""
+    merged = dict(base)
+    for key, value in patch.items():
+        if value is None:
+            continue
+        if isinstance(value, list) and not value:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        merged[key] = value
+    return merged
+
+
+def _color_missing_fields(result: dict) -> list[str]:
+    missing: list[str] = []
+    sub_season = str(result.get("sub_season") or "").strip()
+    if not sub_season or canonicalize_sub_season(sub_season) is None:
+        missing.append("sub_season")
+
+    confidence_raw = result.get("confidence")
+    if not isinstance(confidence_raw, (int, float)):
+        missing.append("confidence")
+
+    if not str(result.get("explanation") or "").strip():
+        missing.append("explanation")
+
+    if not str(result.get("advice") or "").strip():
+        missing.append("advice")
+
+    return missing
+
+
+def _build_color_quality_hint_prompt(quality_flags: dict) -> str:
+    reasons: list[str] = []
+    if quality_flags.get("soft_far_subject_for_color"):
+        reasons.append("chủ thể trong ảnh chiếm khung hình chưa nhiều")
+    if quality_flags.get("soft_low_detail"):
+        reasons.append("ảnh hơi mềm hoặc thiếu chi tiết")
+    if quality_flags.get("soft_bad_lighting"):
+        reasons.append("ánh sáng chưa thật sự tối ưu")
+    if quality_flags.get("soft_color_cast"):
+        reasons.append("ảnh có thể bị lệch màu nhẹ")
+
+    joined = ", ".join(reasons) if reasons else "ảnh chưa thật sự tối ưu"
+    return (
+        "<quality_hint>\n"
+        f"Ảnh này vẫn có thể phân tích, nhưng {joined}.\n"
+        "Hãy ưu tiên phân tích best-effort thay vì từ chối.\n"
+        "Nếu độ chắc chắn không cao, hãy hạ confidence ở mức hợp lý: lỗi nhẹ khoảng 0.55-0.75,\n"
+        "nhiều vấn đề hơn thì có thể thấp hơn, và nói rõ rằng đây là kết quả tham khảo.\n"
+        "Không được từ chối chỉ vì ảnh hơi xa, hơi mềm hoặc ánh sáng chưa hoàn hảo nếu vẫn thấy rõ 1 người.\n"
+        "</quality_hint>"
+    )
+
+
+def _build_color_completion_prompt(
+    missing_fields: list[str],
+    partial_result: dict,
+    quality_flags: dict,
+) -> str:
     missing_text = ", ".join(missing_fields)
     return (
         "<task>\n"
-        "Báº¡n vá»«a phÃ¢n tÃ­ch body shape tá»« áº£nh nÃ y nhÆ°ng cÃ²n thiáº¿u má»™t sá»‘ field báº¯t buá»™c.\n"
-        f"HÃ£y phÃ¢n tÃ­ch láº¡i cÃ¹ng áº£nh vÃ  tráº£ JSON hoÃ n chá»‰nh, táº­p trung bá»• sung: {missing_text}.\n"
-        "Náº¿u áº£nh khÃ´ng Ä‘á»§ rÃµ Ä‘á»ƒ káº¿t luáº­n cháº¯c cháº¯n, Æ°u tiÃªn váº«n tráº£ káº¿t quáº£ vá»›i confidence tháº¥p,\n"
-        "chá»‰ tráº£ JSON lá»—i CLOTHING_TOO_WIDE khi trang phá»¥c che dÃ¡ng quÃ¡ náº·ng vÃ  khÃ´ng thá»ƒ suy luáº­n tá»· lá»‡ cÆ¡ báº£n.\n"
-        "nhÆ°ng khÃ´ng Ä‘Æ°á»£c bá»‹a máº¹o máº·c Ä‘á»“ chung chung.\n"
-        f"Partial result trÆ°á»›c Ä‘Ã³ Ä‘á»ƒ tham chiáº¿u: {json.dumps(partial_result, ensure_ascii=False)}\n"
+        "Bạn vừa phân tích seasonal color từ ảnh này nhưng còn thiếu một số field quan trọng.\n"
+        f"Hãy phân tích lại cùng ảnh và chỉ tập trung bổ sung: {missing_text}.\n"
+        "Giữ nguyên hướng phân tích đã có nếu sub_season hiện tại vẫn hợp lý.\n"
+        "Nếu ảnh chưa đủ hoàn hảo, vẫn trả best-effort với confidence thấp thay vì từ chối.\n"
+        "secondary_season có thể để trống nếu không chắc, nhưng sub_season phải là 1 trong 12 mùa chuẩn.\n"
+        f"Partial result trước đó để tham chiếu: {json.dumps(partial_result, ensure_ascii=False)}\n"
+        f"{_build_color_quality_hint_prompt(quality_flags)}\n"
+        "</task>"
+    )
+
+
+def _fallback_color_explanation(sub_season: str, quality_flags: dict) -> str:
+    explanation = (
+        f"Hệ thống nhận diện bạn gần nhất với nhóm {sub_season} dựa trên tổng thể da, tóc và mắt trong ảnh."
+    )
+    if quality_flags.get("soft_far_subject_for_color") or quality_flags.get("soft_low_detail"):
+        return (
+            f"{explanation} Tuy vậy ảnh hiện tại chưa thật sự lý tưởng nên kết quả này nên được dùng như tham khảo."
+        )
+    return explanation
+
+
+def _fallback_color_advice(result: dict) -> str:
+    menswear = result.get("menswear")
+    if isinstance(menswear, dict):
+        tops = [item for item in menswear.get("tops", []) if isinstance(item, str) and item.strip()]
+        bottoms = [
+            item for item in menswear.get("bottoms", []) if isinstance(item, str) and item.strip()
+        ]
+        if tops and bottoms:
+            return (
+                f"Ưu tiên {tops[0]} cho áo/layer và phối cùng {bottoms[0]} để tổng thể dễ hài hòa hơn."
+            )
+        if tops:
+            return f"Ưu tiên các gam như {tops[0]} cho áo hoặc layer để gương mặt trông sáng và cân bằng hơn."
+    return "Ưu tiên các gam màu nằm trong bảng gợi ý và chọn outfit có độ tương phản vừa phải để tôn da hơn."
+
+
+def _build_body_completion_prompt(missing_fields: list[str], partial_result: dict) -> str:
+    """Prompt ngắn để yêu cầu Gemini chỉ hoàn thiện phần còn thiếu."""
+    missing_text = ", ".join(missing_fields)
+    return (
+        "<task>\n"
+        "Bạn vừa phân tích body shape từ ảnh này nhưng còn thiếu một số field bắt buộc.\n"
+        f"Hãy phân tích lại cùng ảnh và trả JSON hoàn chỉnh, tập trung bổ sung: {missing_text}.\n"
+        "Chỉ điền measurements khi thực sự quan sát được tỷ lệ vai/hông/eo từ ảnh;\n"
+        "không được suy diễn measurements chỉ từ shape name.\n"
+        "Nếu ảnh không đủ rõ để kết luận chắc chắn, ưu tiên vẫn trả kết quả với confidence thấp,\n"
+        "chỉ trả JSON lỗi CLOTHING_TOO_WIDE khi trang phục che dáng quá nặng và không thể suy luận tỷ lệ cơ bản.\n"
+        "Không được bịa mẹo mặc đồ chung chung hoặc cố làm kết quả trông chắc chắn hơn thực tế.\n"
+        f"Partial result trước đó để tham chiếu: {json.dumps(partial_result, ensure_ascii=False)}\n"
         "</task>"
     )
 
@@ -128,26 +261,149 @@ def _apply_clothing_soft_fail_adjustments(result: dict) -> dict:
     return patched
 
 
-def _soft_quality_warning_message() -> str:
+def _should_return_color_close_up_guidance(quality_flags: dict) -> bool:
+    return bool(quality_flags.get("soft_far_subject_for_color"))
+
+
+def _color_close_up_guidance_message(_quality_flags: dict) -> str:
     return (
-        "Ảnh hiện tại hơi nhỏ hoặc thiếu chi tiết, kết quả chỉ nên dùng để tham khảo. "
-        "Bạn có thể chụp ảnh sáng và rõ hơn để tăng độ chính xác."
+        "Ảnh hiện tại chụp hơi xa nên phù hợp để phân tích dáng người hơn là phân tích màu sắc. "
+        "Để phân tích màu chính xác hơn, hãy dùng ảnh selfie gần hơn, thấy rõ khuôn mặt và vùng cổ, "
+        "ánh sáng đều và không đeo kính râm/phụ kiện che mặt."
     )
+
+
+def _should_bias_body_best_effort(quality_flags: dict) -> bool:
+    return (
+        bool(quality_flags.get("soft_low_detail"))
+        and not bool(quality_flags.get("soft_low_resolution"))
+        and not bool(quality_flags.get("soft_bad_lighting"))
+        and not bool(quality_flags.get("soft_color_cast"))
+    )
+
+
+def _build_body_medium_quality_hint_prompt(quality_flags: dict) -> str:
+    detail_score = quality_flags.get("detail_score")
+    return (
+        "<quality_hint>\n"
+        "Ảnh này là ảnh toàn thân mức trung bình: vẫn nhìn thấy silhouette tổng thể, "
+        "nhưng chi tiết không quá cao.\n"
+        f"Detail score tham khảo: {detail_score}.\n"
+        "Hãy ưu tiên phân tích best-effort dựa trên tương quan vai/eo/hông và form tổng thể.\n"
+        "Không được từ chối chỉ vì khuôn mặt nhỏ, ảnh hơi mềm hoặc áo thun hơi rộng.\n"
+        "Chỉ trả CLOTHING_TOO_WIDE khi thực sự không nhìn thấy tương quan vai/eo/hông ở mức tối thiểu.\n"
+        "Nếu độ chắc chắn thấp, hạ confidence xuống 0.25-0.45 và ghi rõ là kết quả tham khảo.\n"
+        "</quality_hint>"
+    )
+
+
+def _soft_quality_warning_message(quality_flags: dict) -> str:
+    reasons: list[str] = []
+    if quality_flags.get("soft_far_subject_for_color"):
+        reasons.append("chủ thể trong ảnh hơi nhỏ hoặc hơi xa")
+    if quality_flags.get("soft_low_resolution"):
+        reasons.append("độ phân giải còn thấp")
+    if quality_flags.get("soft_low_detail"):
+        reasons.append("ảnh thiếu chi tiết")
+    if quality_flags.get("soft_bad_lighting"):
+        reasons.append("ánh sáng chưa ổn định")
+    if quality_flags.get("soft_color_cast"):
+        reasons.append("ảnh có lệch màu")
+
+    joined = ", ".join(reasons) if reasons else "chất lượng ảnh chưa tối ưu"
+    return (
+        f"Ảnh hiện tại có {joined}, nên kết quả chỉ nên dùng để tham khảo. "
+        "Bạn có thể chụp ảnh sáng hơn, cân bằng màu hơn và rõ hơn để tăng độ chính xác."
+    )
+
+
+def _photo_quality_score_value(quality_flags: dict) -> float:
+    raw_score = quality_flags.get("photo_quality_score")
+    if isinstance(raw_score, (int, float)):
+        return max(0.0, min(float(raw_score), 1.0))
+    return 0.75
+
+
+def _photo_quality_band_value(quality_flags: dict) -> str:
+    raw_band = str(quality_flags.get("photo_quality_band") or "").strip().lower()
+    if raw_band in {"excellent", "good", "usable", "poor"}:
+        return raw_band
+    score = _photo_quality_score_value(quality_flags)
+    if score >= 0.85:
+        return "excellent"
+    if score >= 0.72:
+        return "good"
+    if score >= 0.58:
+        return "usable"
+    return "poor"
+
+
+def _soft_quality_confidence_cap(quality_flags: dict) -> float | None:
+    far_subject = bool(quality_flags.get("soft_far_subject_for_color"))
+    low_resolution = bool(quality_flags.get("soft_low_resolution"))
+    low_detail = bool(quality_flags.get("soft_low_detail"))
+    bad_lighting = bool(quality_flags.get("soft_bad_lighting"))
+    color_cast = bool(quality_flags.get("soft_color_cast"))
+    photo_quality_score = _photo_quality_score_value(quality_flags)
+    photo_quality_band = _photo_quality_band_value(quality_flags)
+
+    if not (far_subject or low_resolution or low_detail or bad_lighting or color_cast):
+        return None
+
+    if photo_quality_band == "excellent":
+        cap = 0.84
+    elif photo_quality_band == "good":
+        cap = 0.78
+    elif photo_quality_band == "usable":
+        cap = 0.70
+    else:
+        cap = 0.60
+
+    if photo_quality_score < 0.52:
+        cap = min(cap, 0.62)
+    if photo_quality_score < 0.45:
+        cap = min(cap, 0.56)
+    if far_subject:
+        cap = min(cap, 0.55)
+    if low_resolution and photo_quality_score < 0.65:
+        cap = min(cap, 0.66)
+    if low_detail and photo_quality_score < 0.72:
+        cap = min(cap, 0.72)
+    if bad_lighting and photo_quality_score < 0.72:
+        cap = min(cap, 0.72)
+    if color_cast and photo_quality_score < 0.74:
+        cap = min(cap, 0.74)
+
+    soft_issue_count = sum(1 for flag in (low_resolution, low_detail, bad_lighting, color_cast) if flag)
+    if soft_issue_count >= 2:
+        cap = min(cap, 0.64)
+    if soft_issue_count >= 3:
+        cap = min(cap, 0.58)
+    if far_subject and soft_issue_count >= 1:
+        cap = min(cap, 0.52)
+
+    return cap
+
+
+def _attach_photo_quality_metadata(result: dict, quality_flags: dict) -> dict:
+    patched = dict(result)
+    patched["photo_quality_score"] = round(_photo_quality_score_value(quality_flags), 4)
+    patched["photo_quality_band"] = _photo_quality_band_value(quality_flags)
+    return patched
 
 
 def _apply_soft_quality_adjustments(result: dict, quality_flags: dict) -> dict:
     """Lower confidence and add a friendly warning when image quality is suboptimal."""
-    low_resolution = bool(quality_flags.get("soft_low_resolution"))
-    low_detail = bool(quality_flags.get("soft_low_detail"))
-    if not (low_resolution or low_detail):
-        return result
+    confidence_cap = _soft_quality_confidence_cap(quality_flags)
+    patched = _attach_photo_quality_metadata(result, quality_flags)
+    if confidence_cap is None:
+        return patched
 
-    warning = _soft_quality_warning_message()
-    patched = dict(result)
+    warning = _soft_quality_warning_message(quality_flags)
 
     confidence_raw = patched.get("confidence")
     if isinstance(confidence_raw, (int, float)):
-        patched["confidence"] = min(float(confidence_raw), 0.55)
+        patched["confidence"] = min(float(confidence_raw), confidence_cap)
 
     explanation = str(patched.get("explanation") or "").strip()
     if explanation:
@@ -160,35 +416,62 @@ def _apply_soft_quality_adjustments(result: dict, quality_flags: dict) -> dict:
     return patched
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# POST /api/v1/analyze/color (TÃ­nh nÄƒng #16, #17, #18, #19)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+def _finalize_color_result(result: dict, quality_flags: dict) -> dict:
+    patched = _canonicalize_color_result(dict(result))
+    confidence_cap = _soft_quality_confidence_cap(quality_flags)
+    has_soft_warning = confidence_cap is not None
+    photo_quality_score = _photo_quality_score_value(quality_flags)
+
+    confidence_raw = patched.get("confidence")
+    if isinstance(confidence_raw, (int, float)):
+        patched["confidence"] = float(confidence_raw)
+    else:
+        baseline = 0.48 + 0.34 * photo_quality_score
+        patched["confidence"] = min(0.84, round(baseline, 4))
+        if has_soft_warning:
+            patched["confidence"] = min(patched["confidence"], 0.7)
+
+    if not str(patched.get("secondary_season") or "").strip():
+        patched["secondary_season"] = patched["sub_season"]
+
+    if not str(patched.get("explanation") or "").strip():
+        patched["explanation"] = _fallback_color_explanation(patched["sub_season"], quality_flags)
+
+    if not str(patched.get("advice") or "").strip():
+        patched["advice"] = _fallback_color_advice(patched)
+
+    return _apply_soft_quality_adjustments(patched, quality_flags)
+
+
+# ----------------------------------------------------------------------
+# POST /api/v1/analyze/color (Tính năng #16, #17, #18, #19)
+# ----------------------------------------------------------------------
 @router.post(
     "/color",
     response_model=ApiResponse[ColorApiResponse],
-    summary="F1 â€” PhÃ¢n tÃ­ch mÃ u sáº¯c cÃ¡ nhÃ¢n",
-    description="Nháº­n áº£nh selfie, tráº£ vá» 12-season + palette + makeup guide.",
+    summary="F1 - Phân tích màu sắc cá nhân",
+    description="Nhận ảnh selfie, trả về 12-season + palette + makeup guide.",
 )
 async def analyze_color(
-    file: UploadFile = File(..., description="áº¢nh selfie JPEG/PNG"),
+    file: UploadFile = File(..., description="Ảnh selfie JPEG/PNG"),
     x_device_id: str = Header(
-        ..., description="SHA256 device ID (TÃ­nh nÄƒng #3)"
+        ..., description="SHA256 device ID (Tính năng #3)"
     ),
     client: GeminiClient = Depends(get_gemini_client),
     db: Session = Depends(get_db),
 ) -> ApiResponse[ColorApiResponse]:
-    """PhÃ¢n tÃ­ch mÃ u sáº¯c cÃ¡ nhÃ¢n tá»« áº£nh selfie.
+    """Phân tích màu sắc cá nhân từ ảnh selfie.
 
     Flow:
-        Upload â†’ Validate â†’ Compress â†’ Gemini â†’ Override palette â†’ Response
+        Upload -> Validate -> Compress -> Gemini -> Override palette -> Response
     """
     tmp_path: str | None = None
 
     try:
-        # --- BÆ°á»›c 1: Äá»c file upload ---
+        # --- Bước 1: Đọc file upload ---
         file_bytes = await file.read()
         logger.info(
-            "ðŸ“¸ Color analysis request | device=%s | size=%d bytes",
+            "Color analysis request | device=%s | size=%d bytes",
             x_device_id[:8],
             len(file_bytes),
         )
@@ -197,40 +480,80 @@ async def analyze_color(
             file_bytes,
             max_kb=1000,
         )
+        logger.info("F1 quality_flags=%s", json.dumps(quality_flags, ensure_ascii=False))
 
-        # --- BÆ°á»›c 4: LÆ°u táº¡m (Ä‘á»ƒ log/debug náº¿u cáº§n) ---
+        # --- Bước 4: Lưu tạm (để log/debug nếu cần) ---
         with tempfile.NamedTemporaryFile(
             suffix=".jpg", delete=False
         ) as tmp:
             tmp.write(compressed)
             tmp_path = tmp.name
 
-        # --- BÆ°á»›c 5: Gá»i Gemini (TÃ­nh nÄƒng #10, #11, #12) ---
+        # --- Bước 5: Gọi Gemini (Tính năng #10, #11, #12) ---
         system_instruction_f1, prompt_f1 = get_color_prompts()
+        if _should_return_color_close_up_guidance(quality_flags) or bool(
+            quality_flags.get("soft_low_detail")
+        ):
+            prompt_f1 = f"{prompt_f1}\n\n{_build_color_quality_hint_prompt(quality_flags)}"
+
         result = await client.analyze(
             image_bytes=compressed,
             prompt=prompt_f1,
-            response_schema=ColorGeminiResponse,
+            response_schema=ColorInferenceResponse,
             system_instruction=system_instruction_f1,
         )
 
         # If Gemini returns a structured error, propagate as an API-level error.
         if result.get("error_code") is not None:
-            return ApiResponse(
-                success=False,
-                data=None,
-                error=result.get(
+            return _api_error_response(
+                result.get(
                     "message",
-                    "KhÃ´ng thá»ƒ phÃ¢n tÃ­ch áº£nh. Vui lÃ²ng thá»­ láº¡i vá»›i áº£nh rÃµ hÆ¡n.",
+                    "Không thể phân tích ảnh. Vui lòng thử lại với ảnh rõ hơn.",
                 ),
-                error_code=422,
+                str(result.get("error_code")).strip().upper() or ERROR_CODE_ANALYSIS_FAILED,
             )
 
-        # --- BÆ°á»›c 6: Canonicalize F1 tá»« season_data.py (TÃ­nh nÄƒng #20) ---
-        result = _canonicalize_color_result(result)
-        result = _apply_soft_quality_adjustments(result, quality_flags)
+        missing_fields = _color_missing_fields(result)
+        if missing_fields:
+            logger.warning(
+                "F1 thiếu field sau lượt đầu: %s | device=%s",
+                missing_fields,
+                x_device_id[:8],
+            )
+            repair_prompt = _build_color_completion_prompt(
+                missing_fields,
+                result,
+                quality_flags,
+            )
+            repaired = await client.analyze(
+                image_bytes=compressed,
+                prompt=repair_prompt,
+                response_schema=ColorInferenceResponse,
+                system_instruction=system_instruction_f1,
+            )
+            if repaired.get("error_code") is None:
+                result = _merge_color_result(result, repaired)
+            else:
+                logger.info(
+                    "F1 repair returned structured error %s; keep first pass if still usable",
+                    repaired.get("error_code"),
+                )
 
-        # --- BÆ°á»›c 7: LÆ°u vÃ o ANALYSIS_HISTORY ---
+        missing_fields = _color_missing_fields(result)
+        if missing_fields and "sub_season" in missing_fields:
+            _raise_typed_http(
+                503,
+                (
+                    "AI phản hồi chưa đủ dữ liệu để kết luận mùa sắc đáng tin cậy. "
+                    "Vui lòng thử lại sau vài giây hoặc dùng ảnh selfie rõ hơn."
+                ),
+                ERROR_CODE_AI_INCOMPLETE,
+            )
+
+        # --- Bước 6: Canonicalize + enrich F1 từ season_data.py ---
+        result = _finalize_color_result(result, quality_flags)
+
+        # --- Bước 7: Lưu vào ANALYSIS_HISTORY ---
         save_color_result(
             db=db,
             device_id=x_device_id,
@@ -245,72 +568,86 @@ async def analyze_color(
             data=ColorApiResponse.model_validate(result),
         )
 
-    # â”€â”€â”€ Error Handling (TÃ­nh nÄƒng #34) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # -------------------- Error Handling (Tính năng #34) --------------------
     except HTTPException:
-        raise  # 422 tá»« validate_image â€” giá»¯ nguyÃªn
+        raise  # 422 từ validate_image - giữ nguyên
 
     except TimeoutError:
-        logger.error("â±ï¸ Gemini timeout cho F1")
-        raise HTTPException(
-            status_code=503,
-            detail="AI Ä‘ang báº­n. Vui lÃ²ng thá»­ láº¡i sau 5 giÃ¢y.",
+        logger.error("Gemini timeout cho F1")
+        _raise_typed_http(
+            503,
+            "AI đang phản hồi chậm hoặc quá tải. Vui lòng thử lại sau khoảng 30 giây.",
+            ERROR_CODE_AI_OVERLOADED,
         )
 
     except DeadlineExceeded:
-        logger.error("â±ï¸ Gemini timeout (DeadlineExceeded) cho F1")
-        raise HTTPException(
-            status_code=503,
-            detail="AI Ä‘ang báº­n. Vui lÃ²ng thá»­ láº¡i sau 5 giÃ¢y.",
+        logger.error("Gemini timeout (DeadlineExceeded) cho F1")
+        _raise_typed_http(
+            503,
+            "AI đang phản hồi chậm hoặc quá tải. Vui lòng thử lại sau khoảng 30 giây.",
+            ERROR_CODE_AI_OVERLOADED,
+        )
+
+    except GeminiInvalidResponseError as exc:
+        logger.warning("⚠️ Gemini returned incomplete F1 response: %s", str(exc))
+        _raise_typed_http(
+            503,
+            (
+                "AI phản hồi chưa đầy đủ cho phân tích màu sắc. "
+                "Vui lòng thử lại sau vài giây hoặc dùng ảnh selfie rõ hơn."
+            ),
+            ERROR_CODE_AI_INCOMPLETE,
         )
 
     except ValueError as exc:
-        logger.error("ðŸ”´ Gemini JSON parse error: %s", str(exc))
-        raise HTTPException(
-            status_code=400,
-            detail="KhÃ´ng phÃ¢n tÃ­ch Ä‘Æ°á»£c áº£nh. Vui lÃ²ng chá»¥p áº£nh rÃµ hÆ¡n.",
+        logger.error("Gemini JSON parse error: %s", str(exc))
+        _raise_typed_http(
+            503,
+            (
+                "AI trả về kết quả chưa nhất quán cho phân tích màu sắc. "
+                "Vui lòng thử lại sau vài giây."
+            ),
+            ERROR_CODE_AI_INVALID_RESULT,
         )
 
     except Exception as exc:
-        logger.exception("ðŸ’¥ Lá»—i khÃ´ng xÃ¡c Ä‘á»‹nh trong F1: %s", str(exc))
-        raise HTTPException(
-            status_code=503,
-            detail="Há»‡ thá»‘ng gáº·p sá»± cá»‘. Vui lÃ²ng thá»­ láº¡i sau.",
-        )
+        logger.exception("Lỗi không xác định trong F1: %s", str(exc))
+        _raise_typed_http(503, "Hệ thống gặp sự cố. Vui lòng thử lại sau.", ERROR_CODE_ANALYSIS_FAILED)
 
-    # â”€â”€â”€ Photo Cleanup (TÃ­nh nÄƒng #9) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ---------------------- Photo Cleanup (Tính năng #9) ---------------------
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
-            logger.info("ðŸ—‘ï¸ ÄÃ£ xÃ³a áº£nh táº¡m: %s", tmp_path)
+            logger.info("Đã xóa ảnh tạm: %s", tmp_path)
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# POST /api/v1/analyze/body (TÃ­nh nÄƒng #23, #24, #25, #26)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ----------------------------------------------------------------------
+# POST /api/v1/analyze/body (Tính năng #23, #24, #25, #26)
+# ----------------------------------------------------------------------
 @router.post(
     "/body",
     response_model=ApiResponse[BodyApiResponse],
-    summary="F2 â€” PhÃ¢n tÃ­ch dÃ¡ng ngÆ°á»i",
-    description="Nháº­n áº£nh toÃ n thÃ¢n, tráº£ vá» body shape + styling tips.",
+    summary="F2 - Phân tích dáng người",
+    description="Nhận ảnh toàn thân, trả về body shape + styling tips.",
 )
 async def analyze_body(
-    file: UploadFile = File(..., description="áº¢nh toÃ n thÃ¢n JPEG/PNG"),
+    file: UploadFile = File(..., description="Ảnh toàn thân JPEG/PNG"),
     x_device_id: str = Header(
-        ..., description="SHA256 device ID (TÃ­nh nÄƒng #3)"
+        ..., description="SHA256 device ID (Tính năng #3)"
     ),
     client: GeminiClient = Depends(get_gemini_client),
     db: Session = Depends(get_db),
 ) -> ApiResponse[BodyApiResponse]:
-    """PhÃ¢n tÃ­ch dÃ¡ng ngÆ°á»i tá»« áº£nh toÃ n thÃ¢n.
+    """Phân tích dáng người từ ảnh toàn thân.
 
-    Flow tÆ°Æ¡ng tá»± F1 â€” copy pattern try/finally.
+    Flow tương tự F1 - copy pattern try/finally.
     """
     tmp_path: str | None = None
 
     try:
         file_bytes = await file.read()
         logger.info(
-            "ðŸ“¸ Body analysis request | device=%s | size=%d bytes",
+            "Body analysis request | device=%s | size=%d bytes",
             x_device_id[:8],
             len(file_bytes),
         )
@@ -319,6 +656,7 @@ async def analyze_body(
             file_bytes,
             max_kb=1000,
         )
+        logger.info("F2 quality_flags=%s", json.dumps(quality_flags, ensure_ascii=False))
 
         with tempfile.NamedTemporaryFile(
             suffix=".jpg", delete=False
@@ -327,6 +665,8 @@ async def analyze_body(
             tmp_path = tmp.name
 
         system_instruction_f2, prompt_f2 = get_body_prompts()
+        if _should_bias_body_best_effort(quality_flags):
+            prompt_f2 = f"{prompt_f2}\n\n{_build_body_medium_quality_hint_prompt(quality_flags)}"
 
         result = await client.analyze(
             image_bytes=compressed,
@@ -357,9 +697,9 @@ async def analyze_body(
                         data=None,
                         error=retry_result.get(
                             "message",
-                            "KhÃ´ng thá»ƒ phÃ¢n tÃ­ch dÃ¡ng ngÆ°á»i chÃ­nh xÃ¡c do trang phá»¥c quÃ¡ rá»™ng.",
+                            "Không thể phân tích dáng người chính xác do trang phục quá rộng.",
                         ),
-                        error_code=422,
+                        error_code=ERROR_CODE_CLOTHING_TOO_WIDE,
                     )
             else:
                 return ApiResponse(
@@ -367,16 +707,16 @@ async def analyze_body(
                     data=None,
                     error=result.get(
                         "message",
-                        "KhÃ´ng thá»ƒ phÃ¢n tÃ­ch dÃ¡ng ngÆ°á»i chÃ­nh xÃ¡c tá»« áº£nh hiá»‡n táº¡i.",
+                        "Không thể phân tích dáng người chính xác từ ảnh hiện tại.",
                     ),
-                    error_code=422,
+                    error_code=str(result.get("error_code")).strip().upper() or ERROR_CODE_ANALYSIS_FAILED,
                 )
 
         parsed_result = BodyGeminiResponse.model_validate(result)
         missing_fields = parsed_result.missing_detail_fields()
         if missing_fields:
             logger.warning(
-                "F2 thiáº¿u field grounded sau lÆ°á»£t Ä‘áº§u: %s | device=%s",
+                "F2 thiếu field grounded sau lượt đầu: %s | device=%s",
                 missing_fields,
                 x_device_id[:8],
             )
@@ -409,9 +749,9 @@ async def analyze_body(
                             data=None,
                             error=retry_result.get(
                                 "message",
-                                "KhÃ´ng thá»ƒ phÃ¢n tÃ­ch dÃ¡ng ngÆ°á»i chÃ­nh xÃ¡c tá»« áº£nh hiá»‡n táº¡i.",
+                                "Không thể phân tích dáng người chính xác từ ảnh hiện tại.",
                             ),
-                            error_code=422,
+                            error_code=ERROR_CODE_CLOTHING_TOO_WIDE,
                         )
                 else:
                     return ApiResponse(
@@ -419,9 +759,9 @@ async def analyze_body(
                         data=None,
                         error=repaired.get(
                             "message",
-                            "KhÃ´ng thá»ƒ phÃ¢n tÃ­ch dÃ¡ng ngÆ°á»i chÃ­nh xÃ¡c tá»« áº£nh hiá»‡n táº¡i.",
+                            "Không thể phân tích dáng người chính xác từ ảnh hiện tại.",
                         ),
-                        error_code=422,
+                        error_code=str(repaired.get("error_code")).strip().upper() or ERROR_CODE_ANALYSIS_FAILED,
                     )
 
             result = _merge_body_result(result, repaired)
@@ -430,7 +770,7 @@ async def analyze_body(
 
         if missing_fields:
             logger.warning(
-                "F2 váº«n thiáº¿u field sau repair pass: %s | device=%s",
+                "F2 vẫn thiếu field sau repair pass: %s | device=%s",
                 missing_fields,
                 x_device_id[:8],
             )
@@ -438,10 +778,10 @@ async def analyze_body(
                 success=False,
                 data=None,
                 error=(
-                    "áº¢nh chÆ°a Ä‘á»§ rÃµ Ä‘á»ƒ Ä‘Æ°a ra gá»£i Ã½ dÃ¡ng ngÆ°á»i Ä‘Ã¡ng tin cáº­y. "
-                    "Vui lÃ²ng dÃ¹ng áº£nh toÃ n thÃ¢n, Ä‘á»©ng tháº³ng vÃ  máº·c Ä‘á»“ Ã´m sÃ¡t hÆ¡n."
+                    "Ảnh chưa đủ rõ để đưa ra gợi ý dáng người đáng tin cậy. "
+                    "Vui lòng dùng ảnh toàn thân, đứng thẳng và mặc đồ ôm sát hơn."
                 ),
-                error_code=422,
+                error_code=ERROR_CODE_AI_INCOMPLETE,
             )
 
         response_payload = parsed_result.model_dump()
@@ -450,7 +790,10 @@ async def analyze_body(
             quality_flags,
         )
         if response_payload.get("confidence") is None:
-            response_payload["confidence"] = 0.4
+            response_payload["confidence"] = round(
+                min(0.78, 0.38 + 0.32 * _photo_quality_score_value(quality_flags)),
+                4,
+            )
 
         save_body_result(
             db=db,
@@ -469,55 +812,69 @@ async def analyze_body(
         raise
 
     except TimeoutError:
-        raise HTTPException(
-            status_code=503,
-            detail="AI Ä‘ang báº­n. Vui lÃ²ng thá»­ láº¡i sau 5 giÃ¢y.",
+        _raise_typed_http(
+            503,
+            "AI đang phản hồi chậm hoặc quá tải. Vui lòng thử lại sau khoảng 30 giây.",
+            ERROR_CODE_AI_OVERLOADED,
         )
 
     except DeadlineExceeded:
-        raise HTTPException(
-            status_code=503,
-            detail="AI Ä‘ang báº­n. Vui lÃ²ng thá»­ láº¡i sau 5 giÃ¢y.",
+        _raise_typed_http(
+            503,
+            "AI đang phản hồi chậm hoặc quá tải. Vui lòng thử lại sau khoảng 30 giây.",
+            ERROR_CODE_AI_OVERLOADED,
+        )
+
+    except GeminiInvalidResponseError as exc:
+        logger.warning("⚠️ Gemini returned incomplete F2 response: %s", str(exc))
+        _raise_typed_http(
+            503,
+            (
+                "AI phản hồi chưa đầy đủ cho phân tích dáng người. "
+                "Vui lòng thử lại sau vài giây hoặc dùng ảnh toàn thân rõ hơn."
+            ),
+            ERROR_CODE_AI_INCOMPLETE,
         )
 
     except ValueError as exc:
-        logger.error("ðŸ”´ Body JSON parse error: %s", str(exc))
-        raise HTTPException(
-            status_code=400,
-            detail="KhÃ´ng phÃ¢n tÃ­ch Ä‘Æ°á»£c áº£nh. Chá»¥p áº£nh toÃ n thÃ¢n rÃµ hÆ¡n nhÃ©!",
+        logger.error("Body JSON parse error: %s", str(exc))
+        _raise_typed_http(
+            503,
+            (
+                "AI trả về kết quả chưa nhất quán cho phân tích dáng người. "
+                "Vui lòng thử lại sau vài giây."
+            ),
+            ERROR_CODE_AI_INVALID_RESULT,
         )
 
     except Exception as exc:
-        logger.exception("ðŸ’¥ Lá»—i khÃ´ng xÃ¡c Ä‘á»‹nh trong F2: %s", str(exc))
-        raise HTTPException(
-            status_code=503,
-            detail="Há»‡ thá»‘ng gáº·p sá»± cá»‘. Vui lÃ²ng thá»­ láº¡i sau.",
-        )
+        logger.exception("Lỗi không xác định trong F2: %s", str(exc))
+        _raise_typed_http(503, "Hệ thống gặp sự cố. Vui lòng thử lại sau.", ERROR_CODE_ANALYSIS_FAILED)
 
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
-            logger.info("ðŸ—‘ï¸ ÄÃ£ xÃ³a áº£nh táº¡m: %s", tmp_path)
+            logger.info("Đã xóa ảnh tạm: %s", tmp_path)
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# GET /api/v1/analyze/history (SHOULD â€” Xem láº¡i káº¿t quáº£)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ----------------------------------------------------------------------
+# GET /api/v1/analyze/history (SHOULD - Xem lại kết quả)
+# ----------------------------------------------------------------------
 @router.get(
     "/history",
     response_model=ApiResponse[HistoryApiResponse],
-    summary="Xem láº¡i káº¿t quáº£ phÃ¢n tÃ­ch F1 + F2",
-    description="Äá»c káº¿t quáº£ phÃ¢n tÃ­ch Ä‘Ã£ lÆ°u trong AnalysisHistory.",
+    summary="Xem lại kết quả phân tích F1 + F2",
+    description="Đọc kết quả phân tích đã lưu trong AnalysisHistory.",
 )
 async def get_analysis_history(
     x_device_id: str = Header(
-        ..., description="SHA256 device ID (TÃ­nh nÄƒng #3)"
+        ..., description="SHA256 device ID (Tính năng #3)"
     ),
     db: Session = Depends(get_db),
 ) -> ApiResponse[HistoryApiResponse]:
-    """Tráº£ vá» lá»‹ch sá»­ F1 + F2 náº¿u Ä‘Ã£ phÃ¢n tÃ­ch.
+    """Trả về lịch sử F1 + F2 nếu đã phân tích.
 
-    SHOULD: MÃ n "Xem láº¡i káº¿t quáº£" Ä‘á»c *_result_json tá»« AnalysisHistory.
+    SHOULD: Màn "Xem lại kết quả" đọc *_result_json từ AnalysisHistory.
     """
     history = get_analysis(db, x_device_id)
 

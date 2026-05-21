@@ -1,0 +1,8 @@
+{
+  "backend": "hf_clip",
+  "model": "openai/clip-vit-base-patch32",
+  "version": "2026-05-mens-v1",
+  "encoded_outfits": 40,
+  "requested_outfits": 40,
+  "generated_at": "2026-05-20T16:47:13.660030+00:00"
+}

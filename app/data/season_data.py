@@ -17,12 +17,82 @@ class MakeupData(TypedDict):
     hair: list[str]
 
 
+class MenswearData(TypedDict):
+    tops: list[str]
+    bottoms: list[str]
+    accessories: list[str]
+
+
 class SeasonEntry(TypedDict):
     primary: str
     palette: list[str]       # 6 hex codes chuẩn
     makeup: MakeupData
     gradient_from: str       # Cho SeasonGradientCard (frontend)
     gradient_to: str         # Cho SeasonGradientCard (frontend)
+
+
+MENSWEAR_BY_SUBSEASON: dict[str, MenswearData] = {
+    "Light Spring": {
+        "tops": ["Kem sáng", "xanh mint nhạt", "đào ấm rất nhẹ"],
+        "bottoms": ["Be sáng", "stone", "xanh navy nhạt"],
+        "accessories": ["Sneaker trắng ngà", "kim loại vàng nhạt", "đồng hồ dây da màu tan"],
+    },
+    "True Spring": {
+        "tops": ["Coral ấm", "vàng ấm vừa phải", "xanh lá tươi sạch"],
+        "bottoms": ["Khaki ấm", "navy sạch", "nâu sáng"],
+        "accessories": ["Đồng hồ dây da nâu sáng", "kim loại vàng", "loafer màu tan"],
+    },
+    "Bright Spring": {
+        "tops": ["Trắng sạch", "xanh cobalt sáng", "cam đỏ rõ sắc"],
+        "bottoms": ["Navy đậm", "be sáng", "than chì nhạt"],
+        "accessories": ["Sneaker trắng sắc nét", "kim loại bóng", "kính gọng đen gọn"],
+    },
+    "Light Summer": {
+        "tops": ["Xanh baby", "xám lạnh sáng", "hồng bụi sáng"],
+        "bottoms": ["Ghi sáng", "navy mềm", "be lạnh"],
+        "accessories": ["Sneaker trắng lạnh", "kim loại bạc", "thắt lưng nâu tro sáng"],
+    },
+    "True Summer": {
+        "tops": ["Xanh dusty", "mauve lạnh", "xám xanh trung tính"],
+        "bottoms": ["Charcoal mềm", "navy muted", "stone lạnh"],
+        "accessories": ["Bạc xước mờ", "giày suede xám", "đồng hồ mặt bạc lạnh"],
+    },
+    "Soft Summer": {
+        "tops": ["Taupe lạnh", "sage dịu", "xám khói mềm"],
+        "bottoms": ["Nâu tro", "ghi trung tính", "navy xám"],
+        "accessories": ["Da lộn xám nâu", "kim loại bạc mờ", "túi canvas tông trầm"],
+    },
+    "Soft Autumn": {
+        "tops": ["Olive muted", "camel nhạt", "be ấm trầm"],
+        "bottoms": ["Khaki đậm", "nâu chocolate vừa", "denim wash đậm"],
+        "accessories": ["Da nâu lì", "kim loại đồng", "boots suede nâu mềm"],
+    },
+    "True Autumn": {
+        "tops": ["Terracotta", "olive đậm", "camel rõ sắc"],
+        "bottoms": ["Nâu đất", "khaki đậm", "indigo trầm"],
+        "accessories": ["Thắt lưng da nâu đậm", "đồng hồ mặt đồng", "boots da nâu"],
+    },
+    "Deep Autumn": {
+        "tops": ["Forest green", "nâu espresso", "burgundy ấm"],
+        "bottoms": ["Than nâu", "olive đậm", "denim đậm không wash mạnh"],
+        "accessories": ["Da nâu sẫm", "kim loại đồng tối", "boots nâu chocolate"],
+    },
+    "Deep Winter": {
+        "tops": ["Navy đậm", "đen", "burgundy lạnh"],
+        "bottoms": ["Charcoal", "đen", "xám lạnh đậm"],
+        "accessories": ["Kim loại bạc", "giày da đen", "đồng hồ mặt tối giản"],
+    },
+    "True Winter": {
+        "tops": ["Trắng sắc nét", "đen", "navy lạnh sạch"],
+        "bottoms": ["Than chì", "đen", "xám lạnh"],
+        "accessories": ["Bạc bóng", "derby đen", "kính gọng đen tối giản"],
+    },
+    "Bright Winter": {
+        "tops": ["Trắng tinh", "cobalt sáng", "đen contrast cao"],
+        "bottoms": ["Than chì đậm", "đen", "navy sắc nét"],
+        "accessories": ["Bạc bóng", "sneaker trắng sắc nét", "đồng hồ thép sáng"],
+    },
+}
 
 
 # ═══════════════════════════════════════════════
@@ -240,3 +310,11 @@ def get_season_gradient(sub_season: str) -> tuple[str, str]:
 def get_all_sub_seasons() -> list[str]:
     """Danh sách 12 sub-season — dùng validate Gemini response."""
     return list(SEASON_DATA.keys())
+
+
+def get_menswear_recommendation(sub_season: str) -> MenswearData:
+    """Male-focused color application keyed by sub-season for better precision."""
+    canonical = canonicalize_sub_season(sub_season)
+    if canonical is None:
+        raise KeyError(f"Sub-season không hợp lệ: {sub_season}")
+    return MENSWEAR_BY_SUBSEASON[canonical]

@@ -11,8 +11,10 @@ Optional:
 
 import argparse
 import csv
+import json
 import os
 import sys
+from datetime import datetime, timezone
 from io import BytesIO
 
 import numpy as np
@@ -23,6 +25,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.db.database import SessionLocal, init_db
 from app.db.models import Outfit
+
+
+EMBEDDING_SCHEMA_VERSION = "2026-05-mens-v1"
 
 
 def _safe_console_text(value: object) -> str:
@@ -95,7 +100,11 @@ def _build_image_encoder():
         def _encode(image: Image.Image) -> np.ndarray:
             return fclip.encode_images([image], batch_size=1)[0]
 
-        return _encode, "fashion_clip"
+        return _encode, {
+            "backend": "fashion_clip",
+            "model": "fashion-clip",
+            "version": EMBEDDING_SCHEMA_VERSION,
+        }
     except Exception as exc:
         print(f"FashionCLIP unavailable, fallback to transformers CLIP: {exc}")
 
@@ -122,7 +131,28 @@ def _build_image_encoder():
             features = _to_numpy_features(raw, projection_layer=getattr(model, "visual_projection", None))
         return features[0]
 
-    return _encode, "hf_clip"
+    return _encode, {
+        "backend": "hf_clip",
+        "model": "openai/clip-vit-base-patch32",
+        "version": EMBEDDING_SCHEMA_VERSION,
+    }
+
+
+def _write_manifest(meta: dict[str, str], success_count: int, total_count: int) -> None:
+    manifest = {
+        "backend": meta["backend"],
+        "model": meta["model"],
+        "version": meta["version"],
+        "encoded_outfits": success_count,
+        "requested_outfits": total_count,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    output_dir = os.path.join(os.path.dirname(__file__), "..", "data")
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, "outfit_vectors.meta.json")
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=2)
+    print(f"Wrote manifest -> {output_path}")
 
 
 def encode_all() -> None:
@@ -149,7 +179,7 @@ def encode_all() -> None:
     db = SessionLocal()
 
     try:
-        image_encoder, backend = _build_image_encoder()
+        image_encoder, meta = _build_image_encoder()
         if image_encoder is None:
             return
 
@@ -185,7 +215,7 @@ def encode_all() -> None:
             print("INFO: no outfit needs encoding.")
             return
 
-        print(f"Encoding {len(outfits)} outfits (backend={backend})...")
+        print(f"Encoding {len(outfits)} outfits (backend={meta['backend']})...")
 
         success_count = 0
         for i, outfit in enumerate(outfits, 1):
@@ -211,11 +241,16 @@ def encode_all() -> None:
 
             vector = vector / norm
             outfit.vector_blob = vector.tobytes()
+            outfit.embedding_backend = meta["backend"]
+            outfit.embedding_model = meta["model"]
+            outfit.embedding_version = meta["version"]
+            outfit.embedding_generated_at = datetime.now(timezone.utc)
             success_count += 1
             print("OK")
 
         db.commit()
         print(f"OK encode done: {success_count}/{len(outfits)} outfits.")
+        _write_manifest(meta, success_count, len(outfits))
 
     finally:
         db.close()

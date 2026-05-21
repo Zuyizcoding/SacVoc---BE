@@ -14,8 +14,10 @@ Notes:
 """
 
 import hashlib
+import json
 import os
 import sys
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -23,6 +25,9 @@ import numpy as np
 
 from app.db.database import SessionLocal, init_db
 from app.db.models import Outfit
+
+
+EMBEDDING_SCHEMA_VERSION = "2026-05-dummy"
 
 
 def _seed_from_text(text: str) -> int:
@@ -52,10 +57,30 @@ def encode_all() -> None:
             key = f"{outfit.shopee_url}|{outfit.image_url}|{outfit.name}".strip("|")
             seed = _seed_from_text(key)
             outfit.vector_blob = _make_vector(seed)
+            outfit.embedding_backend = "dummy"
+            outfit.embedding_model = "sha256-seeded-rng"
+            outfit.embedding_version = EMBEDDING_SCHEMA_VERSION
+            outfit.embedding_generated_at = datetime.now(timezone.utc)
             updated += 1
 
         db.commit()
         print(f"OK Dummy encode done: updated={updated}")
+        output_dir = os.path.join(os.path.dirname(__file__), "..", "data")
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, "outfit_vectors.meta.json")
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "backend": "dummy",
+                    "model": "sha256-seeded-rng",
+                    "version": EMBEDDING_SCHEMA_VERSION,
+                    "encoded_outfits": updated,
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                },
+                f,
+                ensure_ascii=False,
+                indent=2,
+            )
 
     finally:
         db.close()

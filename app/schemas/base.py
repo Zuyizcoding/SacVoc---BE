@@ -13,7 +13,7 @@ class ApiResponse(BaseModel, Generic[T]):
     success: bool
     data: Optional[T] = None
     error: Optional[str] = None
-    error_code: Optional[int] = None
+    error_code: Optional[str | int] = None
 
 
 class HealthResponse(BaseModel):

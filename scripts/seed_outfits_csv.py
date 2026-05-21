@@ -16,6 +16,7 @@ Optional:
 import argparse
 import csv
 import os
+import re
 import sys
 from typing import Any
 
@@ -42,6 +43,146 @@ def _normalize_gender(value: Any) -> str:
         return "female"
     # Allow already-normalized/custom values, but keep it trimmed.
     return v
+
+
+def _normalize_bias_list(value: Any) -> str:
+    raw = _clean(value)
+    if not raw:
+        return ""
+    parts = re.split(r"[|,;/]+", raw)
+    normalized = [part.strip() for part in parts if part.strip()]
+    deduped = list(dict.fromkeys(normalized))
+    return "|".join(deduped)
+
+
+def _extract_seed_biases(name: str) -> tuple[str, str]:
+    match = re.search(r"\(([^-]+)-\s*([^)]+)\)", name)
+    if not match:
+        return ("", "")
+    season = match.group(1).strip()
+    shape = match.group(2).strip()
+    return (season, shape)
+
+
+def _infer_fit(name: str, category: str) -> str:
+    text = f"{name} {category}".lower()
+    if any(token in text for token in ("slimfit", "dáng ôm", "ôm", "fitted", "tailored")):
+        return "tailored" if category in {"set", "outerwear"} else "slim"
+    if any(token in text for token in ("form rộng", "oversize", "ống suông", "boxy", "wide", "rộng rãi")):
+        return "relaxed"
+    if category == "set" and any(token in text for token in ("suit", "vest", "blazer")):
+        return "tailored"
+    return "regular"
+
+
+def _infer_fabric(name: str) -> str:
+    text = name.lower()
+    if any(token in text for token in ("denim", "jeans", "jean")):
+        return "denim"
+    if any(token in text for token in ("lụa", "silk")):
+        return "silk"
+    if any(token in text for token in ("len", "knit", "cardigan")):
+        return "knit"
+    if any(token in text for token in ("da ", "biker", "leather")):
+        return "leather"
+    if any(token in text for token in ("đũi", "linen")):
+        return "linen"
+    if any(token in text for token in ("nhung", "corduroy")):
+        return "corduroy"
+    if any(token in text for token in ("kaki", "cargo", "chinos")):
+        return "cotton_twill"
+    if any(token in text for token in ("nỉ", "hoodie", "sweat")):
+        return "fleece"
+    if any(token in text for token in ("vest", "suit", "blazer", "âu", "tây")):
+        return "woven"
+    return "cotton"
+
+
+def _infer_formality(name: str, occasion: str) -> str:
+    text = f"{name} {occasion}".lower()
+    if any(token in text for token in ("suit", "vest", "blazer", "formal")):
+        return "formal" if occasion in {"party", "date"} else "business_casual"
+    if occasion == "work":
+        return "business_casual"
+    if occasion in {"party", "date"}:
+        return "smart_casual"
+    return "casual"
+
+
+def _infer_color_family(name: str, season: str) -> str:
+    text = name.lower()
+    if any(token in text for token in ("olive", "rêu", "nâu", "be", "kem", "camel", "đất", "terracotta")):
+        return "earth"
+    if any(token in text for token in ("navy", "xanh", "mint", "baby", "ghi", "xám", "đen", "trắng")):
+        return "cool"
+    if any(token in text for token in ("burgundy", "đỏ rượu", "đỏ", "wine")):
+        return "rich"
+    lowered_season = season.lower()
+    if "autumn" in lowered_season:
+        return "earth"
+    if "summer" in lowered_season:
+        return "soft_cool"
+    if "winter" in lowered_season:
+        return "high_contrast"
+    if "spring" in lowered_season:
+        return "warm_bright"
+    return "neutral"
+
+
+def _infer_contrast_level(season: str) -> str:
+    lowered = season.lower()
+    if "winter" in lowered:
+        return "high"
+    if "summer" in lowered:
+        return "low"
+    if "spring" in lowered:
+        return "medium_high"
+    if "autumn" in lowered:
+        return "medium"
+    return "medium"
+
+
+def _infer_silhouette(category: str, shape: str) -> str:
+    normalized = shape.strip().lower()
+    if normalized == "inverted triangle":
+        return "balanced lower body"
+    if normalized == "triangle":
+        return "clean shoulder line"
+    if normalized == "oval":
+        return "vertical line"
+    if normalized == "rectangle":
+        return "layered structure"
+    if normalized == "trapezoid":
+        return "tailored balance"
+    if category == "outerwear":
+        return "structured outer layer"
+    if category == "bottom":
+        return "straight leg"
+    return "clean menswear line"
+
+
+def _build_metadata_payload(row: dict[str, Any], *, name: str, category: str, occasion: str) -> dict[str, str]:
+    season_bias, body_shape_bias = _extract_seed_biases(name)
+    fit = _clean(row.get("fit")) or _infer_fit(name, category)
+    silhouette = _clean(row.get("silhouette")) or _infer_silhouette(category, body_shape_bias)
+    formality = _clean(row.get("formality")) or _infer_formality(name, occasion)
+    fabric = _clean(row.get("fabric")) or _infer_fabric(name)
+    color_family = _clean(row.get("color_family")) or _infer_color_family(name, season_bias)
+    contrast_level = _clean(row.get("contrast_level")) or _infer_contrast_level(season_bias)
+
+    raw_shape_bias = _normalize_bias_list(row.get("body_shape_bias")) or body_shape_bias
+    raw_season_bias = _normalize_bias_list(row.get("season_bias")) or season_bias
+
+    return {
+        "fit": fit,
+        "silhouette": silhouette,
+        "formality": formality,
+        "fabric": fabric,
+        "color_family": color_family,
+        "contrast_level": contrast_level,
+        "body_shape_bias": raw_shape_bias,
+        "season_bias": raw_season_bias,
+    }
 
 
 def _apply_updates(outfit: Outfit, payload: dict[str, str]) -> bool:
@@ -108,6 +249,14 @@ def seed(csv_path: str, *, commit: bool = True) -> None:
                     "price_range": _clean(row.get("price_range")),
                     "occasion": _clean(row.get("occasion")),
                 }
+                payload.update(
+                    _build_metadata_payload(
+                        row,
+                        name=name,
+                        category=payload["category"],
+                        occasion=payload["occasion"],
+                    )
+                )
 
                 # Optional column: gender (any|male|female). If absent/empty → keep default.
                 gender = _normalize_gender(row.get("gender"))

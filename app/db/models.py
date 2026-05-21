@@ -164,10 +164,59 @@ class Outfit(Base):
         comment="any | male | female — dùng để filter recommendation khi seed data có cả nam/nữ"
     )
 
+    fit: str | None = Column(
+        String(20), nullable=True,
+        comment="slim | regular | relaxed | tailored"
+    )
+    silhouette: str | None = Column(
+        String(30), nullable=True,
+        comment="clean shoulder | straight leg | layered | balanced lower body..."
+    )
+    formality: str | None = Column(
+        String(20), nullable=True,
+        comment="casual | smart_casual | business_casual | formal"
+    )
+    fabric: str | None = Column(
+        String(30), nullable=True,
+        comment="cotton | denim | linen | knit | leather | wool | blended"
+    )
+    color_family: str | None = Column(
+        String(30), nullable=True,
+        comment="earth | cool | neutral | dark | bright | pastel..."
+    )
+    contrast_level: str | None = Column(
+        String(20), nullable=True,
+        comment="low | medium | high"
+    )
+    body_shape_bias: str | None = Column(
+        Text, nullable=True,
+        comment="CSV/pipe list of male body shapes suited for this outfit"
+    )
+    season_bias: str | None = Column(
+        Text, nullable=True,
+        comment="CSV/pipe list of season or sub-season tags suited for this outfit"
+    )
+
     # ─── FashionCLIP Embedding (Tính năng #29) ───
     vector_blob: bytes | None = Column(
         LargeBinary, nullable=True,
         comment="FashionCLIP image embedding — 512 dims × float32 = 2048 bytes"
+    )
+    embedding_backend: str | None = Column(
+        String(30), nullable=True,
+        comment="fashion_clip | hf_clip | dummy"
+    )
+    embedding_model: str | None = Column(
+        String(80), nullable=True,
+        comment="Model name used to encode vector_blob"
+    )
+    embedding_version: str | None = Column(
+        String(40), nullable=True,
+        comment="Embedding manifest/schema version"
+    )
+    embedding_generated_at: datetime | None = Column(
+        DateTime(timezone=True), nullable=True,
+        comment="Timestamp when vector_blob was generated"
     )
 
     # ─── Metadata ───

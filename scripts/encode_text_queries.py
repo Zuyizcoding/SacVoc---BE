@@ -1,8 +1,10 @@
 ﻿"""Pre-encode F3 text query vectors."""
 
+import hashlib
 import json
 import os
 import sys
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -16,6 +18,9 @@ from app.services.outfit_service import (
 )
 
 
+EMBEDDING_SCHEMA_VERSION = "2026-05-mens-v1"
+
+
 def _all_query_templates() -> list[str]:
     queries: list[str] = []
     for season in SEASON_KEYWORDS:
@@ -23,6 +28,11 @@ def _all_query_templates() -> list[str]:
             for occasion in OCCASION_KEYWORDS:
                 queries.append(build_outfit_query(season, body_shape, occasion))
     return queries
+
+
+def _query_signature(queries: list[str]) -> str:
+    payload = "\n".join(sorted(queries)).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _to_numpy_features(raw, projection_layer=None) -> np.ndarray:
@@ -53,8 +63,14 @@ def encode_queries() -> None:
         fclip = FashionCLIP("fashion-clip")
         print(f"Encoding {len(queries)} queries with FashionCLIP...")
         text_embeddings = fclip.encode_text(queries, batch_size=32)
+        meta = {
+            "backend": "fashion_clip",
+            "model": "fashion-clip",
+            "version": EMBEDDING_SCHEMA_VERSION,
+        }
     except Exception as exc:
         print(f"FashionCLIP unavailable, fallback to transformers CLIP: {exc}")
+        meta = None
 
     if text_embeddings is None:
         try:
@@ -79,6 +95,11 @@ def encode_queries() -> None:
             )
             raw = model.get_text_features(**inputs)
             text_embeddings = _to_numpy_features(raw, projection_layer=getattr(model, "text_projection", None))
+        meta = {
+            "backend": "hf_clip",
+            "model": "openai/clip-vit-base-patch32",
+            "version": EMBEDDING_SCHEMA_VERSION,
+        }
 
     norms = np.linalg.norm(text_embeddings, axis=1, keepdims=True)
     text_embeddings = text_embeddings / norms
@@ -93,6 +114,19 @@ def encode_queries() -> None:
 
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False)
+
+    with open(os.path.join(output_dir, "query_vectors.meta.json"), "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                **(meta or {}),
+                "query_count": len(queries),
+                "query_signature": _query_signature(queries),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
 
     print(f"Saved {len(output)} vectors -> {output_path}")
 
