@@ -106,6 +106,7 @@ class ColorApiResponse(BaseModel):
     sub_season: str
     primary_season: str
     confidence: float
+    analysis_source: str = "live"
     photo_quality_score: float | None = None
     photo_quality_band: str | None = None
     secondary_season: str

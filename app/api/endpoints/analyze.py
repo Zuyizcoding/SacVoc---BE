@@ -35,6 +35,7 @@ from app.services.gemini_client import (
     GeminiInvalidResponseError,
     get_gemini_client,
 )
+from app.services.demo_cache import get_demo_body_result, get_demo_color_result
 from app.schemas.history import HistoryApiResponse
 from app.utils.image_utils import preprocess_image_for_ai
 from app.db.database import get_db
@@ -59,6 +60,12 @@ ERROR_CODE_AI_INCOMPLETE = "AI_INCOMPLETE"
 ERROR_CODE_AI_OVERLOADED = "AI_OVERLOADED"
 ERROR_CODE_AI_INVALID_RESULT = "AI_INVALID_RESULT"
 ERROR_CODE_ANALYSIS_FAILED = "ANALYSIS_FAILED"
+DEMO_CACHE_COLOR_NOTICE = (
+    "Lưu ý: hệ thống đang dùng kết quả dự phòng vì AI tạm thời quá tải, nên đây là gợi ý demo tham khảo."
+)
+DEMO_CACHE_BODY_NOTICE = (
+    "Lưu ý: hệ thống đang dùng kết quả dự phòng vì AI tạm thời quá tải, nên đây là gợi ý demo tham khảo."
+)
 
 
 def _typed_error_detail(message: str, error_code: str) -> dict[str, str]:
@@ -71,6 +78,28 @@ def _raise_typed_http(status_code: int, message: str, error_code: str) -> None:
 
 def _api_error_response(message: str, error_code: str) -> ApiResponse[None]:
     return ApiResponse(success=False, data=None, error=message, error_code=error_code)
+
+
+def _append_notice(text: str, notice: str) -> str:
+    base = text.strip()
+    if not base:
+        return notice
+    if notice in base:
+        return base
+    return f"{base} {notice}"
+
+
+def _is_ai_overloaded_http(exc: HTTPException) -> bool:
+    if exc.status_code == 429:
+        return True
+
+    detail = exc.detail
+    if isinstance(detail, dict):
+        return str(detail.get("error_code") or "").strip().upper() == ERROR_CODE_AI_OVERLOADED
+    if isinstance(detail, str):
+        lowered = detail.lower()
+        return "quá tải" in lowered or "rate limit" in lowered or "free tier" in lowered
+    return False
 
 
 def _canonicalize_color_result(result: dict) -> dict:
@@ -443,6 +472,78 @@ def _finalize_color_result(result: dict, quality_flags: dict) -> dict:
     return _apply_soft_quality_adjustments(patched, quality_flags)
 
 
+def _build_demo_color_payload(quality_flags: dict) -> dict:
+    payload = _finalize_color_result(get_demo_color_result(), quality_flags)
+    payload["analysis_source"] = "degraded_demo"
+    payload["explanation"] = _append_notice(
+        str(payload.get("explanation") or "").strip(),
+        DEMO_CACHE_COLOR_NOTICE,
+    )
+    payload["advice"] = _append_notice(
+        str(payload.get("advice") or "").strip(),
+        "Lưu ý: hệ thống đang dùng chế độ dự phòng do AI tạm thời quá tải.",
+    )
+    return payload
+
+
+def _build_demo_body_payload(quality_flags: dict) -> dict:
+    payload = BodyGeminiResponse.model_validate(get_demo_body_result()).model_dump()
+    payload = _apply_soft_quality_adjustments(payload, quality_flags)
+    payload["analysis_source"] = "degraded_demo"
+    if payload.get("confidence") is None:
+        payload["confidence"] = round(
+            min(0.72, 0.38 + 0.28 * _photo_quality_score_value(quality_flags)),
+            4,
+        )
+    payload["explanation"] = _append_notice(
+        str(payload.get("explanation") or "").strip(),
+        DEMO_CACHE_BODY_NOTICE,
+    )
+    return payload
+
+
+def _demo_color_response(
+    *,
+    db: Session,
+    device_id: str,
+    quality_flags: dict,
+) -> ApiResponse[ColorApiResponse]:
+    result = _build_demo_color_payload(quality_flags)
+    save_color_result(
+        db=db,
+        device_id=device_id,
+        sub_season=result["sub_season"],
+        primary_season=result["primary_season"],
+        confidence=result["confidence"],
+        full_result=result,
+    )
+    return ApiResponse(
+        success=True,
+        data=ColorApiResponse.model_validate(result),
+    )
+
+
+def _demo_body_response(
+    *,
+    db: Session,
+    device_id: str,
+    quality_flags: dict,
+) -> ApiResponse[BodyApiResponse]:
+    result = _build_demo_body_payload(quality_flags)
+    parsed_result = BodyGeminiResponse.model_validate(result)
+    save_body_result(
+        db=db,
+        device_id=device_id,
+        shape=parsed_result.shape,
+        confidence=float(result["confidence"]),
+        full_result=result,
+    )
+    return ApiResponse(
+        success=True,
+        data=BodyApiResponse.model_validate(result),
+    )
+
+
 # ----------------------------------------------------------------------
 # POST /api/v1/analyze/color (Tính năng #16, #17, #18, #19)
 # ----------------------------------------------------------------------
@@ -466,6 +567,7 @@ async def analyze_color(
         Upload -> Validate -> Compress -> Gemini -> Override palette -> Response
     """
     tmp_path: str | None = None
+    quality_flags: dict = {}
 
     try:
         # --- Bước 1: Đọc file upload ---
@@ -552,6 +654,7 @@ async def analyze_color(
 
         # --- Bước 6: Canonicalize + enrich F1 từ season_data.py ---
         result = _finalize_color_result(result, quality_flags)
+        result["analysis_source"] = "live"
 
         # --- Bước 7: Lưu vào ANALYSIS_HISTORY ---
         save_color_result(
@@ -569,23 +672,30 @@ async def analyze_color(
         )
 
     # -------------------- Error Handling (Tính năng #34) --------------------
-    except HTTPException:
+    except HTTPException as exc:
+        if _is_ai_overloaded_http(exc):
+            logger.warning("F1 fallback to demo cache due to AI overload | device=%s", x_device_id[:8])
+            return _demo_color_response(
+                db=db,
+                device_id=x_device_id,
+                quality_flags=quality_flags,
+            )
         raise  # 422 từ validate_image - giữ nguyên
 
     except TimeoutError:
-        logger.error("Gemini timeout cho F1")
-        _raise_typed_http(
-            503,
-            "AI đang phản hồi chậm hoặc quá tải. Vui lòng thử lại sau khoảng 30 giây.",
-            ERROR_CODE_AI_OVERLOADED,
+        logger.error("Gemini timeout cho F1 -> fallback demo cache")
+        return _demo_color_response(
+            db=db,
+            device_id=x_device_id,
+            quality_flags=quality_flags,
         )
 
     except DeadlineExceeded:
-        logger.error("Gemini timeout (DeadlineExceeded) cho F1")
-        _raise_typed_http(
-            503,
-            "AI đang phản hồi chậm hoặc quá tải. Vui lòng thử lại sau khoảng 30 giây.",
-            ERROR_CODE_AI_OVERLOADED,
+        logger.error("Gemini timeout (DeadlineExceeded) cho F1 -> fallback demo cache")
+        return _demo_color_response(
+            db=db,
+            device_id=x_device_id,
+            quality_flags=quality_flags,
         )
 
     except GeminiInvalidResponseError as exc:
@@ -643,6 +753,7 @@ async def analyze_body(
     Flow tương tự F1 - copy pattern try/finally.
     """
     tmp_path: str | None = None
+    quality_flags: dict = {}
 
     try:
         file_bytes = await file.read()
@@ -789,6 +900,7 @@ async def analyze_body(
             response_payload,
             quality_flags,
         )
+        response_payload["analysis_source"] = "live"
         if response_payload.get("confidence") is None:
             response_payload["confidence"] = round(
                 min(0.78, 0.38 + 0.32 * _photo_quality_score_value(quality_flags)),
@@ -808,21 +920,30 @@ async def analyze_body(
             data=BodyApiResponse.model_validate(response_payload),
         )
 
-    except HTTPException:
+    except HTTPException as exc:
+        if _is_ai_overloaded_http(exc):
+            logger.warning("F2 fallback to demo cache due to AI overload | device=%s", x_device_id[:8])
+            return _demo_body_response(
+                db=db,
+                device_id=x_device_id,
+                quality_flags=quality_flags,
+            )
         raise
 
     except TimeoutError:
-        _raise_typed_http(
-            503,
-            "AI đang phản hồi chậm hoặc quá tải. Vui lòng thử lại sau khoảng 30 giây.",
-            ERROR_CODE_AI_OVERLOADED,
+        logger.error("Gemini timeout cho F2 -> fallback demo cache")
+        return _demo_body_response(
+            db=db,
+            device_id=x_device_id,
+            quality_flags=quality_flags,
         )
 
     except DeadlineExceeded:
-        _raise_typed_http(
-            503,
-            "AI đang phản hồi chậm hoặc quá tải. Vui lòng thử lại sau khoảng 30 giây.",
-            ERROR_CODE_AI_OVERLOADED,
+        logger.error("Gemini timeout (DeadlineExceeded) cho F2 -> fallback demo cache")
+        return _demo_body_response(
+            db=db,
+            device_id=x_device_id,
+            quality_flags=quality_flags,
         )
 
     except GeminiInvalidResponseError as exc:

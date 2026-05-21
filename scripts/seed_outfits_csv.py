@@ -55,6 +55,38 @@ def _normalize_bias_list(value: Any) -> str:
     return "|".join(deduped)
 
 
+def _normalize_occasion(value: Any) -> str:
+    occasion = _clean(value).lower()
+    if occasion == "sport":
+        return "daily"
+    return occasion
+
+
+def _normalize_category(value: Any) -> str:
+    category = _clean(value).lower()
+    if category == "shoes":
+        return "footwear"
+    return category
+
+
+def _normalize_season_bias(value: Any) -> str:
+    normalized = _normalize_bias_list(value)
+    if not normalized:
+        return ""
+
+    aliases = {
+        "spring": "True Spring|Light Spring",
+        "summer": "True Summer|Light Summer",
+        "autumn": "Soft Autumn|True Autumn",
+        "winter": "True Winter|Deep Winter",
+    }
+    parts = [aliases.get(part, part) for part in normalized.split("|")]
+    flattened = []
+    for part in parts:
+        flattened.extend(piece.strip() for piece in part.split("|") if piece.strip())
+    return "|".join(dict.fromkeys(flattened))
+
+
 def _extract_seed_biases(name: str) -> tuple[str, str]:
     match = re.search(r"\(([^-]+)-\s*([^)]+)\)", name)
     if not match:
@@ -62,6 +94,11 @@ def _extract_seed_biases(name: str) -> tuple[str, str]:
     season = match.group(1).strip()
     shape = match.group(2).strip()
     return (season, shape)
+
+
+def _first_bias_value(value: str) -> str:
+    parts = [part.strip() for part in value.split("|") if part.strip()]
+    return parts[0] if parts else ""
 
 
 def _infer_fit(name: str, category: str) -> str:
@@ -162,16 +199,18 @@ def _infer_silhouette(category: str, shape: str) -> str:
 
 
 def _build_metadata_payload(row: dict[str, Any], *, name: str, category: str, occasion: str) -> dict[str, str]:
-    season_bias, body_shape_bias = _extract_seed_biases(name)
+    extracted_season_bias, extracted_body_shape_bias = _extract_seed_biases(name)
+    season_bias = _normalize_season_bias(row.get("season_bias")) or _normalize_season_bias(
+        extracted_season_bias
+    )
+    body_shape_bias = _normalize_bias_list(row.get("body_shape_bias")) or extracted_body_shape_bias
+    season_signal = _first_bias_value(season_bias)
     fit = _clean(row.get("fit")) or _infer_fit(name, category)
     silhouette = _clean(row.get("silhouette")) or _infer_silhouette(category, body_shape_bias)
     formality = _clean(row.get("formality")) or _infer_formality(name, occasion)
     fabric = _clean(row.get("fabric")) or _infer_fabric(name)
-    color_family = _clean(row.get("color_family")) or _infer_color_family(name, season_bias)
-    contrast_level = _clean(row.get("contrast_level")) or _infer_contrast_level(season_bias)
-
-    raw_shape_bias = _normalize_bias_list(row.get("body_shape_bias")) or body_shape_bias
-    raw_season_bias = _normalize_bias_list(row.get("season_bias")) or season_bias
+    color_family = _clean(row.get("color_family")) or _infer_color_family(name, season_signal)
+    contrast_level = _clean(row.get("contrast_level")) or _infer_contrast_level(season_signal)
 
     return {
         "fit": fit,
@@ -180,8 +219,8 @@ def _build_metadata_payload(row: dict[str, Any], *, name: str, category: str, oc
         "fabric": fabric,
         "color_family": color_family,
         "contrast_level": contrast_level,
-        "body_shape_bias": raw_shape_bias,
-        "season_bias": raw_season_bias,
+        "body_shape_bias": body_shape_bias,
+        "season_bias": season_bias,
     }
 
 
@@ -243,11 +282,11 @@ def seed(csv_path: str, *, commit: bool = True) -> None:
 
                 payload = {
                     "name": name,
-                    "category": _clean(row.get("category")),
+                    "category": _normalize_category(row.get("category")),
                     "image_url": _clean(row.get("image_url")),
                     "shopee_url": _clean(row.get("shopee_url")),
                     "price_range": _clean(row.get("price_range")),
-                    "occasion": _clean(row.get("occasion")),
+                    "occasion": _normalize_occasion(row.get("occasion")),
                 }
                 payload.update(
                     _build_metadata_payload(

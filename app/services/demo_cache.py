@@ -67,12 +67,12 @@ def _fallback_color() -> dict:
 def _fallback_body() -> dict:
     """Kết quả mặc định cứng — dùng khi không có file cache."""
     return {
-        "shape": "Hourglass",
-        "confidence": 0.80,
+        "shape": "Rectangle",
+        "confidence": 0.75,
         "measurements": {
             "shoulder_relative": "balanced",
             "hip_relative": "balanced",
-            "waist_definition": "defined",
+            "waist_definition": "moderate",
         },
         "styling_tips": [
             "Ưu tiên trang phục vừa vặn, có phom rõ để cân đối tỷ lệ",
@@ -83,5 +83,5 @@ def _fallback_body() -> dict:
             "Đồ quá rộng/không có phom làm mất tỷ lệ",
             "Đồ quá bó ở một điểm gây mất cân đối tổng thể",
         ],
-        "explanation": "Đây là kết quả mẫu — hệ thống AI tạm thời không khả dụng.",
+        "explanation": "Đây là kết quả mẫu — hệ thống AI tạm thời không khả dụng. Kết quả chỉ mang tính tham khảo.",
     }

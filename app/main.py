@@ -9,9 +9,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.db.database import init_db
+from app.db.database import SessionLocal, init_db
 from app.api.endpoints import analyze
 from app.api.endpoints import outfit  # Phase 5
+from app.services.outfit_service import get_recommendation_readiness
 
 
 @asynccontextmanager
@@ -46,3 +47,18 @@ app.include_router(outfit.router, prefix="/api/v1", tags=["outfit"])  # Phase 5
 async def health():
     """Tính năng #35 — warm-up + verify deploy."""
     return {"status": "ok", "version": settings.APP_VERSION}
+
+
+@app.get("/health/ready")
+async def health_ready():
+    """Readiness probe for demo/preflight checks, especially F3."""
+    db = SessionLocal()
+    try:
+        recommendation = get_recommendation_readiness(db)
+        return {
+            "status": "ok" if recommendation["ready"] else "degraded",
+            "version": settings.APP_VERSION,
+            "recommendation": recommendation,
+        }
+    finally:
+        db.close()

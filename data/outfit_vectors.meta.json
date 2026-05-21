@@ -2,7 +2,7 @@
   "backend": "fashion_clip",
   "model": "fashion-clip",
   "version": "2026-05-mens-v1",
-  "encoded_outfits": 40,
-  "requested_outfits": 40,
-  "generated_at": "2026-05-21T07:25:17.777848+00:00"
+  "encoded_outfits": 2,
+  "requested_outfits": 2,
+  "generated_at": "2026-05-21T13:28:36.648769+00:00"
 }

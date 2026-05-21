@@ -1,5 +1,7 @@
 from app.api.endpoints.analyze import (
     _apply_soft_quality_adjustments,
+    _build_demo_body_payload,
+    _build_demo_color_payload,
     _canonicalize_color_result,
     _finalize_color_result,
     _soft_quality_confidence_cap,
@@ -117,3 +119,70 @@ def test_soft_quality_confidence_cap_gets_stronger_for_multiple_issues() -> None
     )
 
     assert cap == 0.58
+
+
+def test_build_demo_color_payload_attaches_quality_metadata_and_notice(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.api.endpoints.analyze.get_demo_color_result",
+        lambda: {
+            "sub_season": "Soft Autumn",
+            "confidence": 0.72,
+            "secondary_season": "True Autumn",
+            "explanation": "Đây là kết quả mẫu.",
+            "advice": "Ưu tiên bảng màu ấm.",
+        },
+    )
+
+    result = _build_demo_color_payload(
+        {
+            "soft_far_subject_for_color": False,
+            "soft_low_resolution": False,
+            "soft_low_detail": False,
+            "soft_bad_lighting": False,
+            "soft_color_cast": False,
+            "photo_quality_score": 0.63,
+            "photo_quality_band": "usable",
+        }
+    )
+
+    assert result["photo_quality_score"] == 0.63
+    assert result["photo_quality_band"] == "usable"
+    assert result["analysis_source"] == "degraded_demo"
+    assert "kết quả dự phòng" in result["explanation"]
+    assert "chế độ dự phòng" in result["advice"]
+
+
+def test_build_demo_body_payload_attaches_quality_metadata_and_notice(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.api.endpoints.analyze.get_demo_body_result",
+        lambda: {
+            "shape": "Rectangle",
+            "confidence": 0.75,
+            "measurements": {
+                "shoulder_relative": "balanced",
+                "hip_relative": "balanced",
+                "waist_definition": "moderate",
+            },
+            "styling_tips": ["Tip 1", "Tip 2", "Tip 3"],
+            "avoid": ["Avoid 1", "Avoid 2"],
+            "explanation": "Đây là kết quả mẫu.",
+        },
+    )
+
+    result = _build_demo_body_payload(
+        {
+            "soft_far_subject_for_color": False,
+            "soft_low_resolution": False,
+            "soft_low_detail": False,
+            "soft_bad_lighting": False,
+            "soft_color_cast": False,
+            "photo_quality_score": 0.68,
+            "photo_quality_band": "usable",
+        }
+    )
+
+    assert result["photo_quality_score"] == 0.68
+    assert result["photo_quality_band"] == "usable"
+    assert result["confidence"] == 0.75
+    assert result["analysis_source"] == "degraded_demo"
+    assert "kết quả dự phòng" in result["explanation"]

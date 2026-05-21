@@ -9,6 +9,7 @@ from app.services.outfit_service import (
     _load_outfit_embedding_meta,
     _rank_candidates,
     _select_diverse_top_k,
+    _season_alignment_score,
     build_outfit_query,
 )
 
@@ -104,6 +105,73 @@ def test_diversity_selection_skips_duplicate_images() -> None:
     selected = _select_diverse_top_k(ranked, top_k=3)
     assert len(selected) == 2
     assert {candidate.outfit.id for candidate in selected} == {1, 3}
+
+
+def test_season_alignment_score_preserves_primary_season_bonus_for_explicit_subseasons() -> None:
+    outfit = _make_outfit(
+        outfit_id=1,
+        name="A",
+        season_bias="Soft Autumn|True Autumn",
+    )
+
+    score, reasons = _season_alignment_score(outfit, "Deep Autumn")
+
+    assert score == pytest.approx(0.82)
+    assert reasons == ["primary_season"]
+
+
+def test_season_alignment_score_returns_exact_match_for_explicit_subseason() -> None:
+    outfit = _make_outfit(
+        outfit_id=1,
+        name="A",
+        season_bias="Soft Autumn|True Autumn",
+    )
+
+    score, reasons = _season_alignment_score(outfit, "Soft Autumn")
+
+    assert score == pytest.approx(1.0)
+    assert reasons == ["exact_season"]
+
+
+def test_season_alignment_score_returns_mismatch_for_cross_season_bias() -> None:
+    outfit = _make_outfit(
+        outfit_id=1,
+        name="A",
+        season_bias="True Winter|Deep Winter",
+    )
+
+    score, reasons = _season_alignment_score(outfit, "Soft Autumn")
+
+    assert score == pytest.approx(0.15)
+    assert reasons == []
+
+
+def test_rank_candidates_prefers_same_primary_season_with_explicit_subseason_biases() -> None:
+    outfits = [
+        _make_outfit(
+            outfit_id=1,
+            name="Same family",
+            season_bias="Soft Autumn|True Autumn",
+        ),
+        _make_outfit(
+            outfit_id=2,
+            name="Different family",
+            season_bias="True Winter|Deep Winter",
+        ),
+    ]
+    raw_scores = np.array([0.90, 0.90], dtype=np.float32)
+
+    ranked = _rank_candidates(
+        outfits,
+        raw_scores,
+        color_sub_season="Deep Autumn",
+        body_shape="Rectangle",
+        occasion="daily",
+    )
+
+    assert ranked[0].outfit.id == 1
+    assert ranked[0].final_score > ranked[1].final_score
+    assert "primary_season" in ranked[0].reason_tags
 
 
 def test_rank_candidates_softens_rule_bias_when_analysis_confidence_is_low() -> None:

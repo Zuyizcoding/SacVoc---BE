@@ -77,12 +77,12 @@ async def get_outfit_recommendations(
     occasion: str = Query(
         default="daily",
         description="daily | work | party | date — mặc định daily",
-        regex="^(daily|work|party|date)$",
+        pattern="^(daily|work|party|date)$",
     ),
     gender: str = Query(
         default="male",
         description="Male-only mode: chỉ hỗ trợ giá trị 'male'.",
-        regex="^male$",
+        pattern="^male$",
     ),
     db: Session = Depends(get_db),
 ) -> ApiResponse[OutfitRecommendResponse]:

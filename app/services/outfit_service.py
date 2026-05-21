@@ -485,7 +485,10 @@ def _season_alignment_score(outfit: Outfit, color_sub_season: str) -> tuple[floa
     if sub_season and sub_season in bias:
         reasons.append("exact_season")
         return (1.0, reasons)
-    if primary and primary in bias:
+    bias_primary_seasons = {
+        _primary_season(tag).casefold() for tag in bias if _primary_season(tag)
+    }
+    if primary and (primary in bias or primary in bias_primary_seasons):
         reasons.append("primary_season")
         return (0.82, reasons)
     return (0.15, reasons)
@@ -742,3 +745,53 @@ def recommend_outfits(
         query_source=query_bundle.source,
         outfits=outfit_items,
     )
+
+
+def get_recommendation_readiness(
+    db: Session,
+    *,
+    occasion: str = "daily",
+    gender: str = "male",
+) -> dict[str, object]:
+    checks: dict[str, object] = {
+        "catalog_seeded": False,
+        "vector_blob_available": False,
+        "embedding_meta_valid": False,
+        "query_vector_available": False,
+        "query_vector_consistent": False,
+        "query_vector_source": None,
+        "outfit_count": 0,
+        "query_vectors_path": str(_resolve_query_vectors_path()),
+        "errors": [],
+    }
+    errors: list[str] = []
+
+    try:
+        outfits, _ = _load_outfit_vectors(db, occasion=occasion, gender=gender)
+        checks["outfit_count"] = len(outfits)
+        checks["catalog_seeded"] = len(outfits) > 0
+        if outfits:
+            checks["vector_blob_available"] = True
+            meta = _load_outfit_embedding_meta(outfits)
+            checks["embedding_meta_valid"] = True
+            sample_query = build_outfit_query("Soft Autumn", "Rectangle", occasion)
+            query_bundle = _resolve_query_vector(sample_query)
+            checks["query_vector_available"] = True
+            checks["query_vector_source"] = query_bundle.source
+            _assert_query_vector_consistency(query_bundle, meta)
+            checks["query_vector_consistent"] = True
+    except RecommendationNotReadyError as exc:
+        errors.append(str(exc))
+    except Exception as exc:
+        errors.append(f"Unexpected readiness error: {exc}")
+
+    checks["errors"] = errors
+    checks["ready"] = (
+        bool(checks["catalog_seeded"])
+        and bool(checks["vector_blob_available"])
+        and bool(checks["embedding_meta_valid"])
+        and bool(checks["query_vector_available"])
+        and bool(checks["query_vector_consistent"])
+        and not errors
+    )
+    return checks
