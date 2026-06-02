@@ -1,0 +1,16 @@
+[
+  {
+    "case_id": "f1-soft-autumn-001",
+    "image_path": "benchmarks/images/color/sample_soft_autumn_001.jpg",
+    "expected_sub_season": "Soft Autumn",
+    "expected_primary_season": "Autumn",
+    "notes": "Selfie daylight, undertone ấm, muted contrast"
+  },
+  {
+    "case_id": "f1-true-winter-001",
+    "image_path": "benchmarks/images/color/sample_true_winter_001.jpg",
+    "expected_sub_season": "True Winter",
+    "expected_primary_season": "Winter",
+    "notes": "Độ tương phản cao, da lạnh, tóc tối"
+  }
+]

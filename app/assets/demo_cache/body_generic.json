@@ -1,0 +1,19 @@
+{
+  "shape": "Rectangle",
+  "confidence": 0.75,
+  "measurements": {
+    "shoulder_relative": "balanced",
+    "hip_relative": "balanced",
+    "waist_definition": "moderate"
+  },
+  "styling_tips": [
+    "Ưu tiên phom gọn và đường cắt rõ (áo sơ mi/áo thun vừa vặn, quần ống đứng) để tổng thể cân đối",
+    "Thêm độ tương phản nhẹ bằng layer (áo khoác nhẹ/blazer/cardigan) để tạo khối và chiều sâu",
+    "Chọn màu/hoạ tiết tập trung theo mục tiêu: phần trên nổi bật để mở vai, phần dưới tối giản để gọn dáng"
+  ],
+  "avoid": [
+    "Set đồ quá rộng, thiếu cấu trúc khiến tổng thể trông nặng và thiếu gọn gàng",
+    "Đồ quá bó toàn bộ (skinny/ôm sát từ đầu đến chân) dễ lộ khuyết điểm và kém thoải mái"
+  ],
+  "explanation": "Đây là kết quả mẫu — hệ thống AI tạm thời không khả dụng. Kết quả chỉ mang tính tham khảo."
+}

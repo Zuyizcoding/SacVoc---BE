@@ -1,0 +1,35 @@
+[
+  {
+    "case_id": "f3-soft-autumn-rectangle-daily",
+    "color_sub_season": "Soft Autumn",
+    "body_shape": "Rectangle",
+    "occasion": "daily",
+    "expected_any_names": [
+      "Áo cardigan",
+      "chinos",
+      "olive"
+    ],
+    "expected_any_categories": [
+      "top",
+      "bottom",
+      "outerwear"
+    ],
+    "notes": "Case daily cho nam màu ấm muted, ưu tiên texture earthy"
+  },
+  {
+    "case_id": "f3-true-winter-inverted-work",
+    "color_sub_season": "True Winter",
+    "body_shape": "Inverted Triangle",
+    "occasion": "work",
+    "expected_any_names": [
+      "vest",
+      "blazer",
+      "navy"
+    ],
+    "expected_any_categories": [
+      "set",
+      "outerwear"
+    ],
+    "notes": "Case công sở lạnh, cần sharp tailoring"
+  }
+]
