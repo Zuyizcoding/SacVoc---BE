@@ -726,7 +726,7 @@ def recommend_outfits(
     )
 
     outfit_items = [
-        OutfitItem(
+            OutfitItem(
             id=candidate.outfit.id,
             name=candidate.outfit.name,
             category=candidate.outfit.category,
