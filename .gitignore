@@ -60,4 +60,13 @@ coverage.xml
 # --- Logs ---
 *.log
 logs/
+
+# --- AI / IDE tooling (không thuộc source app) ---
 .gitnexus
+.claude/
+AGENTS.md
+CLAUDE.md
+
+# --- Markdown: chỉ giữ README gốc (nếu có) ---
+*.md
+!/README.md
