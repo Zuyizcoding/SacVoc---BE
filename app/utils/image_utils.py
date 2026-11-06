@@ -1,4 +1,4 @@
-﻿"""Image utilities for analysis requests.
+"""Image utilities for analysis requests.
 
 Quick wins implemented:
 - Soft gate instead of strict 400x400 rejection.
@@ -9,8 +9,13 @@ Quick wins implemented:
 import base64
 import io
 
-from fastapi import HTTPException
 from PIL import Image, ImageFilter, ImageStat
+
+from app.services.analysis.errors import PhotoValidationError
+from app.services.analysis.photo_quality import (
+    classify_photo_quality as _photo_quality_band,
+)
+from app.services.analysis.photo_types import PhotoQualityReport, ProcessedImage
 
 
 def _clamp01(value: float) -> float:
@@ -25,30 +30,18 @@ def validate_image(file_bytes: bytes) -> Image.Image:
     try:
         img = Image.open(io.BytesIO(file_bytes))
     except Exception:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "error_code": "PHOTO_UNREADABLE",
-                "message": "Không đọc được ảnh. Vui lòng chọn ảnh rõ hơn hoặc thử ảnh khác.",
-            },
+        raise PhotoValidationError(
+            "Không đọc được ảnh. Vui lòng chọn ảnh rõ hơn hoặc thử ảnh khác.",
+            "PHOTO_UNREADABLE",
         )
-
     width, height = img.size
     short_side = min(width, height)
     area = width * height
-
     if short_side < 140 or area < 30000:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "error_code": "PHOTO_TOO_SMALL",
-                "message": (
-                    "Ảnh quá nhỏ để hệ thống nhận diện chính xác. "
-                    "Vui lòng chọn ảnh rõ hơn, ưu tiên thấy rõ khuôn mặt/cơ thể."
-                ),
-            },
+        raise PhotoValidationError(
+            "Ảnh quá nhỏ để hệ thống nhận diện chính xác. Vui lòng chọn ảnh rõ hơn, ưu tiên thấy rõ khuôn mặt/cơ thể.",
+            "PHOTO_TOO_SMALL",
         )
-
     return img
 
 
@@ -84,7 +77,7 @@ def _estimate_brightness_and_contrast(img: Image.Image) -> tuple[float, float]:
     stat = ImageStat.Stat(gray)
     mean_brightness = float(stat.mean[0])
     stddev = float(stat.stddev[0]) if stat.stddev else 0.0
-    return mean_brightness, stddev
+    return (mean_brightness, stddev)
 
 
 def _estimate_region_brightness_and_contrast(
@@ -121,21 +114,19 @@ def _is_far_subject_for_color(
     face_hint_detail: float,
     upper_center_detail: float,
 ) -> bool:
-    """Heuristic for rejecting F1 photos where the subject is likely too small.
+    """Ước lượng chủ thể quá xa cho F1 để bổ sung cảnh báo và hạ confidence.
 
     Close-up selfies can still have low edge/detail scores under soft lighting,
-    so we only block when the upper-face regions are both low-detail and do not
+    so we only flag when the upper-face regions are both low-detail and do not
     stand out relative to the whole frame.
     """
     if portrait_ratio <= 1.15:
         return False
     if detail_score >= 6.5 or face_hint_detail >= 9.0 or upper_center_detail >= 8.5:
         return False
-
     baseline = max(detail_score, 0.1)
     face_focus_ratio = face_hint_detail / baseline
     upper_center_focus_ratio = upper_center_detail / baseline
-
     return face_focus_ratio < 1.2 and upper_center_focus_ratio < 1.15
 
 
@@ -174,14 +165,12 @@ def _is_soft_bad_lighting(
 
 def _score_resolution_quality(short_side: int, area: int) -> float:
     short_score = _clamp01((short_side - 180.0) / 340.0)
-    area_score = _clamp01((area - 50_000.0) / 250_000.0)
+    area_score = _clamp01((area - 50000.0) / 250000.0)
     return round(0.6 * short_score + 0.4 * area_score, 4)
 
 
 def _score_detail_quality(
-    detail_score: float,
-    face_hint_detail: float,
-    upper_center_detail: float,
+    detail_score: float, face_hint_detail: float, upper_center_detail: float
 ) -> float:
     global_score = _clamp01((detail_score - 4.5) / 5.5)
     face_score = _clamp01((face_hint_detail - 5.5) / 6.5)
@@ -204,7 +193,6 @@ def _score_lighting_quality(
         brightness_score = 0.65
     else:
         brightness_score = 0.4
-
     if face_neck_contrast >= 55:
         contrast_score = 1.0
     elif face_neck_contrast >= 42:
@@ -213,7 +201,6 @@ def _score_lighting_quality(
         contrast_score = 0.65
     else:
         contrast_score = 0.4
-
     score = 0.65 * brightness_score + 0.35 * contrast_score
     if global_brightness > 225 and face_neck_brightness > 210:
         score = min(score, 0.3)
@@ -252,16 +239,6 @@ def _score_framing_quality(
     return round(score, 4)
 
 
-def _photo_quality_band(score: float) -> str:
-    if score >= 0.85:
-        return "excellent"
-    if score >= 0.72:
-        return "good"
-    if score >= 0.58:
-        return "usable"
-    return "poor"
-
-
 def _normalize_for_ai(
     img: Image.Image,
     *,
@@ -274,28 +251,23 @@ def _normalize_for_ai(
     width, height = img.size
     short_side = min(width, height)
     long_side = max(width, height)
-
     scale = 1.0
     if short_side < target_short_side:
         scale = max(scale, target_short_side / float(short_side))
     if long_side * scale > max_side:
         scale = min(scale, max_side / float(long_side))
-
-    if abs(scale - 1.0) > 1e-6:
+    if abs(scale - 1.0) > 1e-06:
         resized = (
             max(1, int(round(width * scale))),
             max(1, int(round(height * scale))),
         )
         img = img.resize(resized, Image.Resampling.LANCZOS)
-
     if not pad_to_square:
         return img
-
     w2, h2 = img.size
     canvas_size = max(w2, h2)
     if w2 == h2:
         return img
-
     canvas = Image.new("RGB", (canvas_size, canvas_size), color=(245, 245, 245))
     left = (canvas_size - w2) // 2
     top = (canvas_size - h2) // 2
@@ -308,7 +280,6 @@ def _compress_pil_image(img: Image.Image, max_kb: int = 1000) -> bytes:
     img = img.convert("RGB")
     output = io.BytesIO()
     quality = 85
-
     while quality > 20:
         output.seek(0)
         output.truncate()
@@ -316,46 +287,28 @@ def _compress_pil_image(img: Image.Image, max_kb: int = 1000) -> bytes:
         if output.tell() <= max_kb * 1024:
             break
         quality -= 10
-
     return output.getvalue()
 
 
-def preprocess_image_for_ai(file_bytes: bytes, max_kb: int = 1000) -> tuple[bytes, dict]:
+def preprocess_image_for_ai(file_bytes: bytes, max_kb: int = 1000) -> ProcessedImage:
     """Preprocess uploaded image for AI and return quality flags."""
     img = validate_image(file_bytes)
-
     width, height = img.size
     short_side = min(width, height)
     area = width * height
     detail_score = _estimate_detail_score(img)
     face_hint_detail = _estimate_region_detail(
-        img,
-        left_ratio=0.30,
-        top_ratio=0.05,
-        right_ratio=0.70,
-        bottom_ratio=0.35,
+        img, left_ratio=0.3, top_ratio=0.05, right_ratio=0.7, bottom_ratio=0.35
     )
     upper_center_detail = _estimate_region_detail(
-        img,
-        left_ratio=0.25,
-        top_ratio=0.0,
-        right_ratio=0.75,
-        bottom_ratio=0.45,
+        img, left_ratio=0.25, top_ratio=0.0, right_ratio=0.75, bottom_ratio=0.45
     )
     brightness, contrast = _estimate_brightness_and_contrast(img)
     face_brightness, face_contrast = _estimate_region_brightness_and_contrast(
-        img,
-        left_ratio=0.28,
-        top_ratio=0.12,
-        right_ratio=0.72,
-        bottom_ratio=0.58,
+        img, left_ratio=0.28, top_ratio=0.12, right_ratio=0.72, bottom_ratio=0.58
     )
     face_neck_brightness, face_neck_contrast = _estimate_region_brightness_and_contrast(
-        img,
-        left_ratio=0.26,
-        top_ratio=0.10,
-        right_ratio=0.74,
-        bottom_ratio=0.72,
+        img, left_ratio=0.26, top_ratio=0.1, right_ratio=0.74, bottom_ratio=0.72
     )
     color_cast = _estimate_color_cast(img)
     portrait_ratio = height / float(width) if width else 1.0
@@ -369,9 +322,7 @@ def preprocess_image_for_ai(file_bytes: bytes, max_kb: int = 1000) -> tuple[byte
     )
     resolution_quality_score = _score_resolution_quality(short_side, area)
     detail_quality_score = _score_detail_quality(
-        detail_score,
-        face_hint_detail,
-        upper_center_detail,
+        detail_score, face_hint_detail, upper_center_detail
     )
     lighting_quality_score = _score_lighting_quality(
         global_brightness=brightness,
@@ -388,14 +339,13 @@ def preprocess_image_for_ai(file_bytes: bytes, max_kb: int = 1000) -> tuple[byte
     )
     photo_quality_score = round(
         0.12 * resolution_quality_score
-        + 0.30 * detail_quality_score
+        + 0.3 * detail_quality_score
         + 0.24 * lighting_quality_score
         + 0.12 * color_quality_score
         + 0.22 * framing_quality_score,
         4,
     )
     photo_quality_band = _photo_quality_band(photo_quality_score)
-
     flags = {
         "orig_width": width,
         "orig_height": height,
@@ -432,22 +382,16 @@ def preprocess_image_for_ai(file_bytes: bytes, max_kb: int = 1000) -> tuple[byte
         "photo_quality_score": photo_quality_score,
         "photo_quality_band": photo_quality_band,
     }
-
     normalized = _normalize_for_ai(
-        img,
-        target_short_side=512,
-        max_side=1600,
-        pad_to_square=True,
+        img, target_short_side=512, max_side=1600, pad_to_square=True
     )
     compressed = _compress_pil_image(normalized, max_kb=max_kb)
-
-    return compressed, flags
+    return ProcessedImage(jpeg_bytes=compressed, quality=PhotoQualityReport(**flags))
 
 
 def compress_image(file_bytes: bytes, max_kb: int = 1000) -> bytes:
     """Backward-compatible wrapper."""
-    compressed, _ = preprocess_image_for_ai(file_bytes, max_kb=max_kb)
-    return compressed
+    return preprocess_image_for_ai(file_bytes, max_kb=max_kb).jpeg_bytes
 
 
 def to_base64(file_bytes: bytes) -> str:

@@ -1,10 +1,10 @@
-"""Pydantic schemas cho F2 — Phân tích dáng người.
+"""Chuẩn hóa dữ liệu F2 và khai báo kết quả trả cho Flutter."""
 
-Tuân thủ: backend-python #3 — Pydantic models cho mọi IO.
-"""
 import re
 
 from pydantic import BaseModel, Field, model_validator
+
+from app.data.body_shapes import canonicalize_inferred_shape
 
 
 def _split_to_list(value: object, *, max_items: int) -> list[str] | None:
@@ -29,7 +29,7 @@ def _split_to_list(value: object, *, max_items: int) -> list[str] | None:
                 raw_parts.append(line)
 
         if not raw_parts:
-            raw_parts = [p.strip() for p in re.split(r"[;]+", text) if p.strip()]  # type: ignore[name-defined]
+            raw_parts = [p.strip() for p in re.split(r"[;]+", text) if p.strip()]
 
         return raw_parts[:max_items] if raw_parts else None
 
@@ -38,74 +38,7 @@ def _split_to_list(value: object, *, max_items: int) -> list[str] | None:
     return [s] if s else None
 
 
-def _canonicalize_male_shape(value: object) -> str | None:
-    if value is None:
-        return None
-    raw = str(value).strip().lower()
-    if not raw:
-        return None
-
-    aliases = {
-        "trapezoid": "Trapezoid",
-        "hinh thang": "Trapezoid",
-        "rectangle": "Rectangle",
-        "chu nhat": "Rectangle",
-        "inverted triangle": "Inverted Triangle",
-        "tam giac nguoc": "Inverted Triangle",
-        "triangle": "Triangle",
-        "tam giac": "Triangle",
-        "oval": "Oval",
-        "hourglass": "Trapezoid",
-        "soft hourglass": "Trapezoid",
-    }
-    return aliases.get(raw, str(value).strip())
-
-
-def _default_measurements_by_shape(shape: str | None) -> dict[str, str] | None:
-    if not shape:
-        return None
-    normalized = shape.strip().lower()
-    if normalized == "trapezoid":
-        return {
-            "shoulder_relative": "broad",
-            "hip_relative": "narrow",
-            "waist_definition": "moderate",
-        }
-    if normalized == "rectangle":
-        return {
-            "shoulder_relative": "balanced",
-            "hip_relative": "balanced",
-            "waist_definition": "minimal",
-        }
-    if normalized == "triangle":
-        return {
-            "shoulder_relative": "narrow",
-            "hip_relative": "broad",
-            "waist_definition": "moderate",
-        }
-    if normalized == "inverted triangle":
-        return {
-            "shoulder_relative": "broad",
-            "hip_relative": "narrow",
-            "waist_definition": "minimal",
-        }
-    if normalized == "oval":
-        return {
-            "shoulder_relative": "balanced",
-            "hip_relative": "balanced",
-            "waist_definition": "minimal",
-        }
-    # Backward compatibility for legacy shapes
-    if normalized in {"hourglass", "soft hourglass"}:
-        return {
-            "shoulder_relative": "broad",
-            "hip_relative": "narrow",
-            "waist_definition": "moderate",
-        }
-    return None
-
-
-def _coerce_measurements(value: object, *, shape: str | None) -> dict[str, str] | None:
+def _coerce_measurements(value: object) -> dict[str, str] | None:
     """Coerce measurement payload to strict schema keys.
 
     Gemini can return:
@@ -137,13 +70,20 @@ def _coerce_measurements(value: object, *, shape: str | None) -> dict[str, str] 
         if ("vai rộng hơn hông" in text) or ("vai rộng" in text and "hông hẹp" in text):
             shoulder_relative = "broad"
             hip_relative = "narrow"
-        elif ("hông rộng hơn vai" in text) or ("vai hẹp" in text and "hông rộng" in text):
+        elif ("hông rộng hơn vai" in text) or (
+            "vai hẹp" in text and "hông rộng" in text
+        ):
             shoulder_relative = "narrow"
             hip_relative = "broad"
 
         if ("eo rõ" in text) or ("eo thắt" in text) or ("waist defined" in text):
             waist_definition = "defined"
-        elif ("eo ít rõ" in text) or ("eo không rõ" in text) or ("eo thẳng" in text) or ("waist minimal" in text):
+        elif (
+            ("eo ít rõ" in text)
+            or ("eo không rõ" in text)
+            or ("eo thẳng" in text)
+            or ("waist minimal" in text)
+        ):
             waist_definition = "minimal"
 
         return {
@@ -157,21 +97,17 @@ def _coerce_measurements(value: object, *, shape: str | None) -> dict[str, str] 
 
 class BodyMeasurements(BaseModel):
     """Tỷ lệ tương đối — Gemini đánh giá từ ảnh, không phải đo pixel."""
-    shoulder_relative: str = Field(
-        description="broad | balanced | narrow"
-    )
-    hip_relative: str = Field(
-        description="broad | balanced | narrow"
-    )
-    waist_definition: str = Field(
-        description="defined | moderate | minimal"
-    )
+
+    shoulder_relative: str = Field(description="broad | balanced | narrow")
+    hip_relative: str = Field(description="broad | balanced | narrow")
+    waist_definition: str = Field(description="defined | moderate | minimal")
 
 
 class BodyGeminiResponse(BaseModel):
     """Schema ép Gemini trả đúng JSON (Tính năng #11).
     Truyền vào `generation_config.response_schema`.
     """
+
     # Edge-case: clothing too wide (puffy/bulky) -> return a structured error.
     error_code: str | None = Field(
         default=None,
@@ -195,13 +131,19 @@ class BodyGeminiResponse(BaseModel):
     )
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     measurements: BodyMeasurements | None = None
-    styling_tips: list[str] | None = Field(default=None, description="3 mẹo mặc đồ tiếng Việt")
-    avoid: list[str] | None = Field(default=None, description="2 kiểu đồ nên tránh tiếng Việt")
-    explanation: str | None = Field(default=None, description="2-3 câu tiếng Việt giải thích")
+    styling_tips: list[str] | None = Field(
+        default=None, description="3 mẹo mặc đồ tiếng Việt"
+    )
+    avoid: list[str] | None = Field(
+        default=None, description="2 kiểu đồ nên tránh tiếng Việt"
+    )
+    explanation: str | None = Field(
+        default=None, description="2-3 câu tiếng Việt giải thích"
+    )
 
     @model_validator(mode="before")
     @classmethod
-    def _coerce_legacy_keys_and_fill_defaults(cls, data):
+    def _normalize_inference_payload(cls, data):
         """Gemini đôi khi trả key khác schema (vd: `recommend`).
 
         Với F2, chỉ normalize/canonicalize input. Không tự bơm lời khuyên
@@ -220,7 +162,7 @@ class BodyGeminiResponse(BaseModel):
                 if isinstance(data.get(k), str) and str(data[k]).strip():
                     data["shape"] = str(data[k]).strip()
                     break
-        data["shape"] = _canonicalize_male_shape(data.get("shape"))
+        data["shape"] = canonicalize_inferred_shape(data.get("shape"))
 
         if data.get("styling_tips") is None:
             for k in ("stylingTips", "tips", "advice", "recommend", "recommendations"):
@@ -230,7 +172,6 @@ class BodyGeminiResponse(BaseModel):
 
         data["measurements"] = _coerce_measurements(
             data.get("measurements"),
-            shape=data.get("shape"),
         )
 
         # Coerce list-ish fields
@@ -272,6 +213,7 @@ class BodyGeminiResponse(BaseModel):
 
 class BodyApiResponse(BaseModel):
     """Response trả về cho Flutter."""
+
     shape: str
     confidence: float
     analysis_source: str = "live"

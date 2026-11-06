@@ -1,22 +1,12 @@
-"""
-Kết nối SQLite — Session Factory cho FastAPI.
+"""Engine, session theo request và migration SQLite tối thiểu."""
 
-Tuân thủ:
-  - backend-python #2: Depends(get_db) inject DB Session
-  - backend-python #4: DATABASE_URL từ Settings (pydantic-settings)
-  - Tính năng #7: SQLite + Railway Volume mount
-
-LƯU Ý:
-  - SQLite trên Railway: file DB nằm trong volume mount (/data/sac_voc.db)
-  - connect_args check_same_thread=False: bắt buộc với SQLite + FastAPI (async)
-  - Tạo bảng tự động khi app khởi động (create_all)
-"""
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+import logging
 from typing import Generator
 
-from app.core.config import settings
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
+from app.core.config import settings
 
 # ═══════════════════════════════════════════════
 # ENGINE + SESSION FACTORY
@@ -41,16 +31,19 @@ SessionLocal = sessionmaker(
 # BASE CLASS — Tất cả model kế thừa từ đây
 # ═══════════════════════════════════════════════
 
+
 class Base(DeclarativeBase):
     """Base class cho mọi SQLAlchemy model.
     Dùng DeclarativeBase (SQLAlchemy 2.0 style) thay vì declarative_base() cũ.
     """
+
     pass
 
 
 # ═══════════════════════════════════════════════
 # DEPENDENCY INJECTION — Dùng trong FastAPI endpoint
 # ═══════════════════════════════════════════════
+
 
 def get_db() -> Generator[Session, None, None]:
     """Inject DB Session vào endpoint qua Depends(get_db).
@@ -74,6 +67,7 @@ def get_db() -> Generator[Session, None, None]:
 # ═══════════════════════════════════════════════
 # INIT — Gọi khi app khởi động
 # ═══════════════════════════════════════════════
+
 
 def init_db() -> None:
     """Tạo tất cả bảng nếu chưa tồn tại.
@@ -115,5 +109,6 @@ def init_db() -> None:
                 if column_name not in col_names:
                     conn.execute(text(statement))
     except Exception:
-        # If DB is not SQLite or table not present yet, ignore.
-        pass
+        logging.getLogger(__name__).warning(
+            "Không áp dụng được migration SQLite tự động", exc_info=True
+        )

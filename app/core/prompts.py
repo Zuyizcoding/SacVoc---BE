@@ -1,24 +1,4 @@
-﻿"""
-Prompt Engineering cho Gemini 2.5 Flash.
-
-Tuân thủ:
-  - backend-python #1: nằm trong core/ — config hệ thống
-  - SHOULD S10: XML delimiters cấu trúc prompt
-  - SHOULD S11: system_instruction tách khỏi user prompt
-
-NGUYÊN TẮC:
-  1. system_instruction → persona + quy tắc output (khởi tạo 1 lần với model)
-  2. user prompt → task cụ thể + hướng dẫn phân tích (gửi mỗi request)
-  3. Dùng XML tags: <role>, <analysis_guide>, <constraints>, <example>, <task>
-  4. KHÔNG đặt temperature < 1.0 — thinking model giảm hiệu suất
-  5. Palette PHẢI override từ season_data.py — KHÔNG để Gemini tự sinh hex
-
-LƯU Ý:
-  - Khi dùng response_schema (Tính năng #11), không cần viết
-    "KHÔNG thêm text bên ngoài JSON" trong prompt
-  - Prompt viết tiếng Việt → Gemini trả tiếng Việt tự nhiên hơn
-  - Few-shot example giúp giảm lỗi format >20%
-"""
+"""Prompt F1/F2: system instruction và task được giữ riêng."""
 
 # ═══════════════════════════════════════════════
 # SYSTEM INSTRUCTIONS — Khởi tạo 1 lần với model
@@ -275,6 +255,7 @@ Thực hiện đúng 4 bước trong analysis_guide, rồi trả JSON theo schem
 # HELPER — Dùng trong gemini_client.py hoặc service layer
 # ═══════════════════════════════════════════════
 
+
 def get_color_prompts() -> tuple[str, str]:
     """Trả (system_instruction, user_prompt) cho F1 Color Analysis.
 
@@ -293,4 +274,3 @@ def get_color_prompts() -> tuple[str, str]:
 def get_body_prompts() -> tuple[str, str]:
     """Trả (system_instruction, user_prompt) cho F2 Body Analysis."""
     return SYSTEM_INSTRUCTION_BODY, PROMPT_BODY
-

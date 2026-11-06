@@ -1,15 +1,13 @@
-"""
-Schema cho màn "Xem lại kết quả" — History Viewer.
+"""Hai kết quả gần nhất, mỗi kết quả có thể chưa tồn tại."""
 
-Tuân thủ: backend-python #3 — Pydantic models cho mọi IO.
-"""
 from pydantic import BaseModel
 
-from app.schemas.color import ColorApiResponse
 from app.schemas.body import BodyApiResponse
+from app.schemas.color import ColorApiResponse
 
 
 class HistoryApiResponse(BaseModel):
     """Response trả về lịch sử F1 + F2 (nếu có)."""
+
     color: ColorApiResponse | None = None
     body: BodyApiResponse | None = None

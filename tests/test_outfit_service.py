@@ -2,15 +2,17 @@ import numpy as np
 import pytest
 
 from app.db.models import Outfit
-from app.services.outfit_service import (
+from app.services.recommendation.catalog import _load_outfit_embedding_meta
+from app.services.recommendation.embedding_store import _assert_query_vector_consistency
+from app.services.recommendation.query_builder import build_outfit_query
+from app.services.recommendation.ranking import (
+    _rank_candidates,
+    _season_alignment_score,
+    _select_diverse_top_k,
+)
+from app.services.recommendation.types import (
     QueryVectorBundle,
     RecommendationNotReadyError,
-    _assert_query_vector_consistency,
-    _load_outfit_embedding_meta,
-    _rank_candidates,
-    _select_diverse_top_k,
-    _season_alignment_score,
-    build_outfit_query,
 )
 
 
@@ -107,60 +109,41 @@ def test_diversity_selection_skips_duplicate_images() -> None:
     assert {candidate.outfit.id for candidate in selected} == {1, 3}
 
 
-def test_season_alignment_score_preserves_primary_season_bonus_for_explicit_subseasons() -> None:
-    outfit = _make_outfit(
-        outfit_id=1,
-        name="A",
-        season_bias="Soft Autumn|True Autumn",
-    )
-
+def test_season_alignment_score_preserves_primary_season_bonus_for_explicit_subseasons() -> (
+    None
+):
+    outfit = _make_outfit(outfit_id=1, name="A", season_bias="Soft Autumn|True Autumn")
     score, reasons = _season_alignment_score(outfit, "Deep Autumn")
-
     assert score == pytest.approx(0.82)
     assert reasons == ["primary_season"]
 
 
 def test_season_alignment_score_returns_exact_match_for_explicit_subseason() -> None:
-    outfit = _make_outfit(
-        outfit_id=1,
-        name="A",
-        season_bias="Soft Autumn|True Autumn",
-    )
-
+    outfit = _make_outfit(outfit_id=1, name="A", season_bias="Soft Autumn|True Autumn")
     score, reasons = _season_alignment_score(outfit, "Soft Autumn")
-
     assert score == pytest.approx(1.0)
     assert reasons == ["exact_season"]
 
 
 def test_season_alignment_score_returns_mismatch_for_cross_season_bias() -> None:
-    outfit = _make_outfit(
-        outfit_id=1,
-        name="A",
-        season_bias="True Winter|Deep Winter",
-    )
-
+    outfit = _make_outfit(outfit_id=1, name="A", season_bias="True Winter|Deep Winter")
     score, reasons = _season_alignment_score(outfit, "Soft Autumn")
-
     assert score == pytest.approx(0.15)
     assert reasons == []
 
 
-def test_rank_candidates_prefers_same_primary_season_with_explicit_subseason_biases() -> None:
+def test_rank_candidates_prefers_same_primary_season_with_explicit_subseason_biases() -> (
+    None
+):
     outfits = [
         _make_outfit(
-            outfit_id=1,
-            name="Same family",
-            season_bias="Soft Autumn|True Autumn",
+            outfit_id=1, name="Same family", season_bias="Soft Autumn|True Autumn"
         ),
         _make_outfit(
-            outfit_id=2,
-            name="Different family",
-            season_bias="True Winter|Deep Winter",
+            outfit_id=2, name="Different family", season_bias="True Winter|Deep Winter"
         ),
     ]
-    raw_scores = np.array([0.90, 0.90], dtype=np.float32)
-
+    raw_scores = np.array([0.9, 0.9], dtype=np.float32)
     ranked = _rank_candidates(
         outfits,
         raw_scores,
@@ -168,18 +151,14 @@ def test_rank_candidates_prefers_same_primary_season_with_explicit_subseason_bia
         body_shape="Rectangle",
         occasion="daily",
     )
-
     assert ranked[0].outfit.id == 1
     assert ranked[0].final_score > ranked[1].final_score
     assert "primary_season" in ranked[0].reason_tags
 
 
 def test_rank_candidates_softens_rule_bias_when_analysis_confidence_is_low() -> None:
-    outfits = [
-        _make_outfit(outfit_id=1, name="A", category="top", image_url="a.jpg"),
-    ]
-    raw_scores = np.array([0.90], dtype=np.float32)
-
+    outfits = [_make_outfit(outfit_id=1, name="A", category="top", image_url="a.jpg")]
+    raw_scores = np.array([0.9], dtype=np.float32)
     high_conf = _rank_candidates(
         outfits,
         raw_scores,
@@ -198,18 +177,14 @@ def test_rank_candidates_softens_rule_bias_when_analysis_confidence_is_low() -> 
         color_confidence=0.35,
         body_confidence=0.35,
     )[0]
-
     assert low_conf.final_score < high_conf.final_score
     assert "low_color_confidence" in low_conf.reason_tags
     assert "low_body_confidence" in low_conf.reason_tags
 
 
 def test_rank_candidates_uses_photo_quality_score_in_downstream_weighting() -> None:
-    outfits = [
-        _make_outfit(outfit_id=1, name="A", category="top", image_url="a.jpg"),
-    ]
-    raw_scores = np.array([0.90], dtype=np.float32)
-
+    outfits = [_make_outfit(outfit_id=1, name="A", category="top", image_url="a.jpg")]
+    raw_scores = np.array([0.9], dtype=np.float32)
     high_quality = _rank_candidates(
         outfits,
         raw_scores,
@@ -232,7 +207,6 @@ def test_rank_candidates_uses_photo_quality_score_in_downstream_weighting() -> N
         color_photo_quality_score=0.42,
         body_photo_quality_score=0.46,
     )[0]
-
     assert low_quality.final_score < high_quality.final_score
     assert "low_color_photo_quality" in low_quality.reason_tags
     assert "low_body_photo_quality" in low_quality.reason_tags

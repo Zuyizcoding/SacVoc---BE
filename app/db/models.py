@@ -1,26 +1,5 @@
-"""
-SQLAlchemy ORM Models — Bảng cơ sở dữ liệu cho Sắc Vóc.
+"""Bảng hồ sơ theo thiết bị và catalog outfit có embeddings."""
 
-Tuân thủ:
-  - backend-python #3: Models (SQLAlchemy) tách biệt Schemas (Pydantic)
-  - Tính năng #7: SQLite persistence
-  - Tính năng #15: AnalysisHistory lưu F1+F2 → phục vụ F3 combined flow
-  - Tính năng #28: Outfit table — 80 items + vector BLOB
-  - Tính năng #29: vector_blob lưu FashionCLIP embedding (encode offline)
-
-QUAN HỆ BẢNG:
-  ┌──────────────────┐
-  │  AnalysisHistory  │  ← Lưu kết quả F1 (color) + F2 (body) theo device_id
-  │  device_id (PK)  │
-  └──────────────────┘
-           │
-           │ F3 đọc sub_season + shape từ đây
-           ▼
-  ┌──────────────────┐
-  │      Outfit       │  ← 80 items, có vector_blob (FashionCLIP embedding)
-  │    id (PK, AI)   │
-  └──────────────────┘
-"""
 from datetime import datetime, timezone
 
 from sqlalchemy import (
@@ -50,61 +29,62 @@ class AnalysisHistory(Base):
 
     # ─── Primary Key: SHA256 device ID ───
     device_id: str = Column(
-        String(64), primary_key=True, index=True,
-        comment="SHA256 hash từ device_info_plus — anonymous identity"
+        String(64),
+        primary_key=True,
+        index=True,
+        comment="SHA256 hash từ device_info_plus — anonymous identity",
     )
 
     # ─── F1 Color Results ───
     color_sub_season: str | None = Column(
-        String(30), nullable=True,
-        comment="VD: 'Soft Autumn', 'True Winter' — NULL nếu chưa phân tích F1"
+        String(30),
+        nullable=True,
+        comment="VD: 'Soft Autumn', 'True Winter' — NULL nếu chưa phân tích F1",
     )
     color_primary_season: str | None = Column(
-        String(10), nullable=True,
-        comment="Spring | Summer | Autumn | Winter"
+        String(10), nullable=True, comment="Spring | Summer | Autumn | Winter"
     )
     color_confidence: float | None = Column(
-        Float, nullable=True,
-        comment="0.0 → 1.0 — mức tự tin Gemini"
+        Float, nullable=True, comment="0.0 → 1.0 — mức tự tin Gemini"
     )
     color_result_json: str | None = Column(
-        Text, nullable=True,
-        comment="Toàn bộ JSON response F1 — backup đầy đủ cho màn 'Xem lại'"
+        Text,
+        nullable=True,
+        comment="Toàn bộ JSON response F1 — backup đầy đủ cho màn 'Xem lại'",
     )
 
     # ─── F2 Body Results ───
     body_shape: str | None = Column(
-        String(30), nullable=True,
-        comment="VD: 'Hourglass', 'Triangle' — NULL nếu chưa phân tích F2"
+        String(30),
+        nullable=True,
+        comment="VD: 'Hourglass', 'Triangle' — NULL nếu chưa phân tích F2",
     )
-    body_confidence: float | None = Column(
-        Float, nullable=True,
-        comment="0.0 → 1.0"
-    )
+    body_confidence: float | None = Column(Float, nullable=True, comment="0.0 → 1.0")
     body_result_json: str | None = Column(
-        Text, nullable=True,
-        comment="Toàn bộ JSON response F2 — backup đầy đủ"
+        Text, nullable=True, comment="Toàn bộ JSON response F2 — backup đầy đủ"
     )
 
     # ─── Timestamps ───
     color_analyzed_at: datetime | None = Column(
-        DateTime(timezone=True), nullable=True,
-        comment="Thời điểm phân tích F1 gần nhất"
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Thời điểm phân tích F1 gần nhất",
     )
     body_analyzed_at: datetime | None = Column(
-        DateTime(timezone=True), nullable=True,
-        comment="Thời điểm phân tích F2 gần nhất"
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Thời điểm phân tích F2 gần nhất",
     )
     created_at: datetime = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
-        comment="Lần đầu thiết bị gửi request"
+        comment="Lần đầu thiết bị gửi request",
     )
     updated_at: datetime = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
-        comment="Lần cuối cập nhật bất kỳ field nào"
+        comment="Lần cuối cập nhật bất kỳ field nào",
     )
 
 
@@ -130,93 +110,104 @@ class Outfit(Base):
 
     # ─── Primary Key ───
     id: int = Column(
-        Integer, primary_key=True, autoincrement=True,
+        Integer,
+        primary_key=True,
+        autoincrement=True,
     )
 
-    # ─── Thông tin outfit (nhập tay — Tính năng #28) ───
     name: str = Column(
-        String(100), nullable=False,
-        comment="VD: 'Váy wrap dress hoa nhí', 'Áo blazer trắng oversize'"
+        String(100),
+        nullable=False,
+        comment="VD: 'Váy wrap dress hoa nhí', 'Áo blazer trắng oversize'",
     )
     category: str = Column(
-        String(50), nullable=False,
-        comment="VD: 'dress', 'top', 'bottom', 'set', 'outerwear'"
+        String(50),
+        nullable=False,
+        comment="VD: 'dress', 'top', 'bottom', 'set', 'outerwear'",
     )
     image_url: str = Column(
-        String(500), nullable=False,
-        comment="URL ảnh outfit — host trên Cloudinary hoặc Supabase Storage"
+        String(500),
+        nullable=False,
+        comment="URL ảnh outfit — host trên Cloudinary hoặc Supabase Storage",
     )
     shopee_url: str = Column(
-        String(500), nullable=False, default="",
-        comment="Link sản phẩm Shopee — Tính năng #33"
+        String(500),
+        nullable=False,
+        default="",
+        comment="Link sản phẩm Shopee — Tính năng #33",
     )
     price_range: str = Column(
-        String(50), nullable=False, default="",
-        comment="VD: '200k-400k', '500k-800k'"
+        String(50), nullable=False, default="", comment="VD: '200k-400k', '500k-800k'"
     )
     occasion: str = Column(
-        String(20), nullable=False, default="daily",
-        comment="daily | work | party | date — Tính năng #28"
+        String(20),
+        nullable=False,
+        default="daily",
+        comment="daily | work | party | date — Tính năng #28",
     )
 
     gender: str = Column(
-        String(10), nullable=False, default="any",
-        comment="any | male | female — dùng để filter recommendation khi seed data có cả nam/nữ"
+        String(10),
+        nullable=False,
+        default="any",
+        comment="any | male | female — dùng để filter recommendation khi seed data có cả nam/nữ",
     )
 
     fit: str | None = Column(
-        String(20), nullable=True,
-        comment="slim | regular | relaxed | tailored"
+        String(20), nullable=True, comment="slim | regular | relaxed | tailored"
     )
     silhouette: str | None = Column(
-        String(30), nullable=True,
-        comment="clean shoulder | straight leg | layered | balanced lower body..."
+        String(30),
+        nullable=True,
+        comment="clean shoulder | straight leg | layered | balanced lower body...",
     )
     formality: str | None = Column(
-        String(20), nullable=True,
-        comment="casual | smart_casual | business_casual | formal"
+        String(20),
+        nullable=True,
+        comment="casual | smart_casual | business_casual | formal",
     )
     fabric: str | None = Column(
-        String(30), nullable=True,
-        comment="cotton | denim | linen | knit | leather | wool | blended"
+        String(30),
+        nullable=True,
+        comment="cotton | denim | linen | knit | leather | wool | blended",
     )
     color_family: str | None = Column(
-        String(30), nullable=True,
-        comment="earth | cool | neutral | dark | bright | pastel..."
+        String(30),
+        nullable=True,
+        comment="earth | cool | neutral | dark | bright | pastel...",
     )
     contrast_level: str | None = Column(
-        String(20), nullable=True,
-        comment="low | medium | high"
+        String(20), nullable=True, comment="low | medium | high"
     )
     body_shape_bias: str | None = Column(
-        Text, nullable=True,
-        comment="CSV/pipe list of male body shapes suited for this outfit"
+        Text,
+        nullable=True,
+        comment="CSV/pipe list of male body shapes suited for this outfit",
     )
     season_bias: str | None = Column(
-        Text, nullable=True,
-        comment="CSV/pipe list of season or sub-season tags suited for this outfit"
+        Text,
+        nullable=True,
+        comment="CSV/pipe list of season or sub-season tags suited for this outfit",
     )
 
-    # ─── FashionCLIP Embedding (Tính năng #29) ───
     vector_blob: bytes | None = Column(
-        LargeBinary, nullable=True,
-        comment="FashionCLIP image embedding — 512 dims × float32 = 2048 bytes"
+        LargeBinary,
+        nullable=True,
+        comment="FashionCLIP image embedding — 512 dims × float32 = 2048 bytes",
     )
     embedding_backend: str | None = Column(
-        String(30), nullable=True,
-        comment="fashion_clip | hf_clip | dummy"
+        String(30), nullable=True, comment="fashion_clip | hf_clip | dummy"
     )
     embedding_model: str | None = Column(
-        String(80), nullable=True,
-        comment="Model name used to encode vector_blob"
+        String(80), nullable=True, comment="Model name used to encode vector_blob"
     )
     embedding_version: str | None = Column(
-        String(40), nullable=True,
-        comment="Embedding manifest/schema version"
+        String(40), nullable=True, comment="Embedding manifest/schema version"
     )
     embedding_generated_at: datetime | None = Column(
-        DateTime(timezone=True), nullable=True,
-        comment="Timestamp when vector_blob was generated"
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp when vector_blob was generated",
     )
 
     # ─── Metadata ───

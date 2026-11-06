@@ -38,7 +38,9 @@ def _safe_console_text(value: object) -> str:
 
 
 def _default_csv_path() -> str:
-    return os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "outfitseed.csv"))
+    return os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "outfitseed.csv")
+    )
 
 
 def _read_csv_keys(csv_path: str) -> tuple[set[str], set[str], int]:
@@ -115,7 +117,9 @@ def prune(csv_path: str, *, commit: bool) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Delete outfits in DB that are not present in the CSV")
+    parser = argparse.ArgumentParser(
+        description="Delete outfits in DB that are not present in the CSV"
+    )
     parser.add_argument("--csv", dest="csv_path", default=_default_csv_path())
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()

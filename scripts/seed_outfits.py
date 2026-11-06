@@ -1,28 +1,13 @@
-"""
-Script nhập 80 outfit vào DB — chạy 1 LẦN trên máy dev.
+"""Seed placeholder cũ; catalog hiện hành được nhập bằng seed_outfits_csv."""
 
-Tính năng #28: Nhập tay 80 ảnh outfit + link Shopee + occasion tag.
-Phân bố (SHOULD Diversity): 30 daily / 20 work / 15 party / 15 date.
-
-Cách chạy:
-    cd src/backend
-    python -m scripts.seed_outfits
-
-LƯU Ý:
-  - Chỉ chạy 1 lần — kiểm tra DB trước khi chạy lại
-  - Team thêm ảnh thật + link Shopee thật vào danh sách bên dưới
-  - image_url: upload ảnh lên Cloudinary → copy URL
-    - App hỗ trợ cả nam lẫn nữ: khi seed thật, nên có outfit nam + nữ (và đa dạng phong cách)
-"""
-import sys
 import os
+import sys
 
 # Thêm src/backend vào path để import app modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.db.database import SessionLocal, init_db
 from app.db.models import Outfit
-
 
 # ═══════════════════════════════════════════════
 # DỮ LIỆU MẪU — Team thay thế bằng data thật
@@ -55,7 +40,6 @@ SAMPLE_OUTFITS: list[dict] = [
         "occasion": "daily",
     },
     # ... Team thêm 27 items daily nữa ...
-
     # ─── WORK (20 items) ──────────────────────
     {
         "name": "Áo blazer trắng + Quần âu đen",
@@ -74,7 +58,6 @@ SAMPLE_OUTFITS: list[dict] = [
         "occasion": "work",
     },
     # ... Team thêm 18 items work nữa ...
-
     # ─── PARTY (15 items) ─────────────────────
     {
         "name": "Váy sequin đen ngắn",
@@ -85,7 +68,6 @@ SAMPLE_OUTFITS: list[dict] = [
         "occasion": "party",
     },
     # ... Team thêm 14 items party nữa ...
-
     # ─── DATE (15 items) ──────────────────────
     {
         "name": "Áo trễ vai + Chân váy xếp ly",

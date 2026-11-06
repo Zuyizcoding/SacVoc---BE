@@ -1,41 +1,19 @@
-﻿"""
-F3 Router — Outfit Recommendation API.
+"""HTTP adapter F3: kiểm tra hồ sơ, gọi recommendation và trả chi tiết."""
 
-Tuân thủ:
-  - backend-python #1: router riêng trong api/endpoints/
-  - backend-python #2: Depends(get_db) inject DB Session
-  - backend-python #3: Pydantic schema cho response, type hints đầy đủ
-  - Tính năng #15: F1+F2→F3 combined flow — kiểm tra đã phân tích chưa
-  - Tính năng #31: GET /outfits/recommend → top-6
-  - Tính năng #32: GET /outfits/{id} → chi tiết outfit
-  - Tính năng #33: shopee_url trong response → nút "Mua trên Shopee"
-  - Tính năng #34: Error handling — 400/404/503
-
-FLOW:
-  Flutter gửi GET /api/v1/outfits/recommend
-    → Header: X-Device-ID (SHA256)
-    → Query param: occasion (optional, default "daily")
-    → Server đọc AnalysisHistory theo device_id
-    → Nếu thiếu F1 hoặc F2 → 400 + message yêu cầu phân tích
-    → Nếu đủ → gọi outfit_service.recommend_outfits()
-    → Trả ApiResponse[OutfitRecommendResponse]
-"""
 import json
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.db.database import get_db
 from app.db.crud import get_analysis, has_completed_f1_f2
+from app.db.database import get_db
 from app.db.models import Outfit
 from app.schemas.base import ApiResponse
 from app.schemas.outfit import (
     OutfitDetailResponse,
-    OutfitItem,
     OutfitRecommendResponse,
 )
 from app.services.outfit_service import RecommendationNotReadyError, recommend_outfits
-
 
 router = APIRouter()
 
@@ -54,8 +32,8 @@ def _extract_photo_quality_score(result_json: str | None) -> float | None:
 
 
 # ═══════════════════════════════════════════════
-# GET /outfits/recommend — Tính năng #31
 # ═══════════════════════════════════════════════
+
 
 @router.get(
     "/outfits/recommend",
@@ -94,7 +72,6 @@ async def get_outfit_recommendations(
       3. Nếu thiếu → 400 Bad Request + message rõ ràng
       4. Nếu đủ → gọi outfit_service.recommend_outfits()
     """
-    # ─── Bước 1: Kiểm tra F1 + F2 (Tính năng #15) ───
     has_f1, has_f2 = has_completed_f1_f2(db, x_device_id)
 
     if not has_f1 and not has_f2:
@@ -103,7 +80,7 @@ async def get_outfit_recommendations(
             detail={
                 "error": "missing_analysis",
                 "message": "Bạn chưa phân tích màu sắc (F1) và dáng người (F2). "
-                           "Vui lòng hoàn thành cả hai trước khi xem gợi ý trang phục.",
+                "Vui lòng hoàn thành cả hai trước khi xem gợi ý trang phục.",
                 "missing": ["color", "body"],
             },
         )
@@ -114,7 +91,7 @@ async def get_outfit_recommendations(
             detail={
                 "error": "missing_color_analysis",
                 "message": "Bạn chưa phân tích màu sắc cá nhân (F1). "
-                           "Vui lòng chụp ảnh selfie để xác định mùa sắc trước.",
+                "Vui lòng chụp ảnh selfie để xác định mùa sắc trước.",
                 "missing": ["color"],
             },
         )
@@ -125,7 +102,7 @@ async def get_outfit_recommendations(
             detail={
                 "error": "missing_body_analysis",
                 "message": "Bạn chưa phân tích dáng người (F2). "
-                           "Vui lòng chụp ảnh toàn thân để xác định dáng trước.",
+                "Vui lòng chụp ảnh toàn thân để xác định dáng trước.",
                 "missing": ["body"],
             },
         )
@@ -147,8 +124,12 @@ async def get_outfit_recommendations(
             top_k=6,
             color_confidence=history.color_confidence,
             body_confidence=history.body_confidence,
-            color_photo_quality_score=_extract_photo_quality_score(history.color_result_json),
-            body_photo_quality_score=_extract_photo_quality_score(history.body_result_json),
+            color_photo_quality_score=_extract_photo_quality_score(
+                history.color_result_json
+            ),
+            body_photo_quality_score=_extract_photo_quality_score(
+                history.body_result_json
+            ),
         )
 
         return ApiResponse(success=True, data=result)
@@ -162,7 +143,6 @@ async def get_outfit_recommendations(
         )
 
     except Exception as e:
-        # Tính năng #34: Error handling — log + trả 503
         # import logging; logging.exception("F3 outfit recommend error")
         raise HTTPException(
             status_code=503,
@@ -174,8 +154,8 @@ async def get_outfit_recommendations(
 
 
 # ═══════════════════════════════════════════════
-# GET /outfits/{id} — Tính năng #32
 # ═══════════════════════════════════════════════
+
 
 @router.get(
     "/outfits/{outfit_id}",
@@ -214,4 +194,3 @@ async def get_outfit_detail(
     )
 
     return ApiResponse(success=True, data=detail)
-

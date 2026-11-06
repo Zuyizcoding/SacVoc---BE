@@ -1,24 +1,20 @@
-"""
-Entry point FastAPI — BỔ SUNG init_db() so với CORE_MUST.
+"""Khởi tạo FastAPI, router và vòng đời database."""
 
-Tuân thủ: backend-python #1 — app/main.py khởi tạo ứng dụng.
-"""
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.endpoints import analyze, outfit
 from app.core.config import settings
 from app.db.database import SessionLocal, init_db
-from app.api.endpoints import analyze
-from app.api.endpoints import outfit  # Phase 5
 from app.services.outfit_service import get_recommendation_readiness
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: tạo bảng DB nếu chưa có. Shutdown: cleanup nếu cần."""
-    init_db()  # ← Tính năng #7: tạo bảng lần đầu
+    init_db()
     yield
     # Shutdown logic (nếu có) đặt ở đây
 
@@ -39,8 +35,8 @@ app.add_middleware(
 )
 
 # --- Routers ---
-app.include_router(analyze.router, tags=["analyze"])  # Phase 3
-app.include_router(outfit.router, prefix="/api/v1", tags=["outfit"])  # Phase 5
+app.include_router(analyze.router, tags=["analyze"])
+app.include_router(outfit.router, prefix="/api/v1", tags=["outfit"])
 
 
 @app.get("/health")

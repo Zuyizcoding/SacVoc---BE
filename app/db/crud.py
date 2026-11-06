@@ -1,13 +1,5 @@
-"""
-CRUD operations cho AnalysisHistory.
+"""Đọc và cập nhật kết quả F1/F2 gần nhất của thiết bị."""
 
-Tuân thủ:
-  - backend-python #2: nhận Session qua tham số (inject từ Depends)
-  - backend-python #3: Type Hints đầy đủ
-
-Tính năng #15: F3 đọc sub_season + shape từ AnalysisHistory
-SHOULD: Màn "Xem lại kết quả" đọc *_result_json từ đây
-"""
 import json
 from datetime import datetime, timezone
 
@@ -22,9 +14,9 @@ def get_analysis(db: Session, device_id: str) -> AnalysisHistory | None:
     Returns:
         AnalysisHistory hoặc None nếu device chưa từng phân tích.
     """
-    return db.query(AnalysisHistory).filter(
-        AnalysisHistory.device_id == device_id
-    ).first()
+    return (
+        db.query(AnalysisHistory).filter(AnalysisHistory.device_id == device_id).first()
+    )
 
 
 def save_color_result(

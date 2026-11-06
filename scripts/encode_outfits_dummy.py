@@ -26,7 +26,6 @@ import numpy as np
 from app.db.database import SessionLocal, init_db
 from app.db.models import Outfit
 
-
 EMBEDDING_SCHEMA_VERSION = "2026-05-dummy"
 
 

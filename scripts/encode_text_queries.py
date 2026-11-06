@@ -1,6 +1,5 @@
-﻿"""Pre-encode F3 text query vectors."""
+"""Pre-encode F3 text query vectors."""
 
-import hashlib
 import json
 import os
 import sys
@@ -10,47 +9,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 
-from app.services.outfit_service import (
-    BODY_KEYWORDS,
-    OCCASION_KEYWORDS,
-    SEASON_KEYWORDS,
-    build_outfit_query,
+from app.services.recommendation.query_builder import (
+    _all_query_templates,
+    _current_query_signature,
 )
-from app.utils.fashion_clip_compat import load_fashion_clip
-
-
-EMBEDDING_SCHEMA_VERSION = "2026-05-mens-v1"
-
-
-def _all_query_templates() -> list[str]:
-    queries: list[str] = []
-    for season in SEASON_KEYWORDS:
-        for body_shape in BODY_KEYWORDS:
-            for occasion in OCCASION_KEYWORDS:
-                queries.append(build_outfit_query(season, body_shape, occasion))
-    return queries
-
-
-def _query_signature(queries: list[str]) -> str:
-    payload = "\n".join(sorted(queries)).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
-
-
-def _to_numpy_features(raw, projection_layer=None) -> np.ndarray:
-    """Handle both tensor output and model-output object (transformers v5+)."""
-    if hasattr(raw, "cpu"):
-        return raw.cpu().numpy()
-
-    pooled = getattr(raw, "pooler_output", None)
-    if pooled is None:
-        raise TypeError(f"Unsupported feature output type: {type(raw)}")
-
-    if projection_layer is not None:
-        in_features = getattr(projection_layer, "in_features", None)
-        if in_features is None or pooled.shape[-1] == in_features:
-            pooled = projection_layer(pooled)
-
-    return pooled.cpu().numpy()
+from app.services.recommendation.types import EMBEDDING_SCHEMA_VERSION
+from app.utils.fashion_clip_compat import clip_features_to_numpy, load_fashion_clip
 
 
 def encode_queries() -> None:
@@ -76,7 +40,9 @@ def encode_queries() -> None:
             import torch
             from transformers import CLIPModel, CLIPProcessor
         except Exception:
-            print("ERROR: Missing encoder deps. Install torch + transformers or fashion-clip.")
+            print(
+                "ERROR: Missing encoder deps. Install torch + transformers or fashion-clip."
+            )
             return
 
         print("Loading transformers CLIP (openai/clip-vit-base-patch32)...")
@@ -93,7 +59,9 @@ def encode_queries() -> None:
                 truncation=True,
             )
             raw = model.get_text_features(**inputs)
-            text_embeddings = _to_numpy_features(raw, projection_layer=getattr(model, "text_projection", None))
+            text_embeddings = clip_features_to_numpy(
+                raw, projection_layer=getattr(model, "text_projection", None)
+            )
         meta = {
             "backend": "hf_clip",
             "model": "openai/clip-vit-base-patch32",
@@ -114,12 +82,14 @@ def encode_queries() -> None:
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False)
 
-    with open(os.path.join(output_dir, "query_vectors.meta.json"), "w", encoding="utf-8") as f:
+    with open(
+        os.path.join(output_dir, "query_vectors.meta.json"), "w", encoding="utf-8"
+    ) as f:
         json.dump(
             {
                 **(meta or {}),
                 "query_count": len(queries),
-                "query_signature": _query_signature(queries),
+                "query_signature": _current_query_signature(),
                 "generated_at": datetime.now(timezone.utc).isoformat(),
             },
             f,

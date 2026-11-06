@@ -28,7 +28,9 @@ def _name_hit(expected_terms: list[str], returned_names: list[str]) -> bool:
     return any(term.lower() in haystack for term in expected_terms)
 
 
-def _category_hit(expected_categories: list[str], returned_categories: list[str]) -> bool:
+def _category_hit(
+    expected_categories: list[str], returned_categories: list[str]
+) -> bool:
     if not expected_categories:
         return False
     actual = {item.lower() for item in returned_categories}
@@ -59,7 +61,9 @@ def evaluate(benchmark_path: str, *, top_k: int = 6) -> dict[str, Any]:
                 {
                     "case_id": case["case_id"],
                     "name_hit": _name_hit(case.get("expected_any_names", []), names),
-                    "category_hit": _category_hit(case.get("expected_any_categories", []), categories),
+                    "category_hit": _category_hit(
+                        case.get("expected_any_categories", []), categories
+                    ),
                     "avg_score": round(mean(scores), 4) if scores else 0.0,
                     "query_used": result.query_used,
                     "returned_names": names,
@@ -86,7 +90,9 @@ def evaluate(benchmark_path: str, *, top_k: int = 6) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate F3 recommendation quality")
     parser.add_argument("--benchmark", required=True, help="Path to F3 benchmark JSON")
-    parser.add_argument("--top-k", type=int, default=6, help="Number of results to evaluate")
+    parser.add_argument(
+        "--top-k", type=int, default=6, help="Number of results to evaluate"
+    )
     parser.add_argument("--output", help="Optional path to write JSON report")
     args = parser.parse_args()
 

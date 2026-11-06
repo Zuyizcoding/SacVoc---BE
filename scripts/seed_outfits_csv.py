@@ -103,9 +103,14 @@ def _first_bias_value(value: str) -> str:
 
 def _infer_fit(name: str, category: str) -> str:
     text = f"{name} {category}".lower()
-    if any(token in text for token in ("slimfit", "dáng ôm", "ôm", "fitted", "tailored")):
+    if any(
+        token in text for token in ("slimfit", "dáng ôm", "ôm", "fitted", "tailored")
+    ):
         return "tailored" if category in {"set", "outerwear"} else "slim"
-    if any(token in text for token in ("form rộng", "oversize", "ống suông", "boxy", "wide", "rộng rãi")):
+    if any(
+        token in text
+        for token in ("form rộng", "oversize", "ống suông", "boxy", "wide", "rộng rãi")
+    ):
         return "relaxed"
     if category == "set" and any(token in text for token in ("suit", "vest", "blazer")):
         return "tailored"
@@ -148,9 +153,15 @@ def _infer_formality(name: str, occasion: str) -> str:
 
 def _infer_color_family(name: str, season: str) -> str:
     text = name.lower()
-    if any(token in text for token in ("olive", "rêu", "nâu", "be", "kem", "camel", "đất", "terracotta")):
+    if any(
+        token in text
+        for token in ("olive", "rêu", "nâu", "be", "kem", "camel", "đất", "terracotta")
+    ):
         return "earth"
-    if any(token in text for token in ("navy", "xanh", "mint", "baby", "ghi", "xám", "đen", "trắng")):
+    if any(
+        token in text
+        for token in ("navy", "xanh", "mint", "baby", "ghi", "xám", "đen", "trắng")
+    ):
         return "cool"
     if any(token in text for token in ("burgundy", "đỏ rượu", "đỏ", "wine")):
         return "rich"
@@ -198,19 +209,29 @@ def _infer_silhouette(category: str, shape: str) -> str:
     return "clean menswear line"
 
 
-def _build_metadata_payload(row: dict[str, Any], *, name: str, category: str, occasion: str) -> dict[str, str]:
+def _build_metadata_payload(
+    row: dict[str, Any], *, name: str, category: str, occasion: str
+) -> dict[str, str]:
     extracted_season_bias, extracted_body_shape_bias = _extract_seed_biases(name)
-    season_bias = _normalize_season_bias(row.get("season_bias")) or _normalize_season_bias(
-        extracted_season_bias
+    season_bias = _normalize_season_bias(
+        row.get("season_bias")
+    ) or _normalize_season_bias(extracted_season_bias)
+    body_shape_bias = (
+        _normalize_bias_list(row.get("body_shape_bias")) or extracted_body_shape_bias
     )
-    body_shape_bias = _normalize_bias_list(row.get("body_shape_bias")) or extracted_body_shape_bias
     season_signal = _first_bias_value(season_bias)
     fit = _clean(row.get("fit")) or _infer_fit(name, category)
-    silhouette = _clean(row.get("silhouette")) or _infer_silhouette(category, body_shape_bias)
+    silhouette = _clean(row.get("silhouette")) or _infer_silhouette(
+        category, body_shape_bias
+    )
     formality = _clean(row.get("formality")) or _infer_formality(name, occasion)
     fabric = _clean(row.get("fabric")) or _infer_fabric(name)
-    color_family = _clean(row.get("color_family")) or _infer_color_family(name, season_signal)
-    contrast_level = _clean(row.get("contrast_level")) or _infer_contrast_level(season_signal)
+    color_family = _clean(row.get("color_family")) or _infer_color_family(
+        name, season_signal
+    )
+    contrast_level = _clean(row.get("contrast_level")) or _infer_contrast_level(
+        season_signal
+    )
 
     return {
         "fit": fit,
@@ -270,7 +291,9 @@ def seed(csv_path: str, *, commit: bool = True) -> None:
                 "price_range",
                 "occasion",
             }
-            if reader.fieldnames is None or not required.issubset(set(reader.fieldnames)):
+            if reader.fieldnames is None or not required.issubset(
+                set(reader.fieldnames)
+            ):
                 raise ValueError(
                     f"CSV headers must include {sorted(required)}; got {reader.fieldnames}"
                 )
@@ -352,7 +375,9 @@ def seed(csv_path: str, *, commit: bool = True) -> None:
 
 
 def _default_csv_path() -> str:
-    return os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "outfitseed.csv"))
+    return os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "outfitseed.csv")
+    )
 
 
 def main() -> None:

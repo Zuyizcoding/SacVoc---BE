@@ -1,4 +1,4 @@
-﻿"""Offline outfit image embedding for F3.
+"""Offline outfit image embedding for F3.
 
 Usage:
     cd CS4153.Q24.CTTT---BE
@@ -25,10 +25,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.db.database import SessionLocal, init_db
 from app.db.models import Outfit
-from app.utils.fashion_clip_compat import load_fashion_clip
-
-
-EMBEDDING_SCHEMA_VERSION = "2026-05-mens-v1"
+from app.services.recommendation.types import EMBEDDING_SCHEMA_VERSION
+from app.utils.fashion_clip_compat import clip_features_to_numpy, load_fashion_clip
 
 
 def _safe_console_text(value: object) -> str:
@@ -37,7 +35,9 @@ def _safe_console_text(value: object) -> str:
 
 
 def _default_csv_path() -> str:
-    return os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "outfitseed.csv"))
+    return os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "outfitseed.csv")
+    )
 
 
 def _read_csv_keys(csv_path: str) -> tuple[set[str], set[str], int]:
@@ -71,22 +71,6 @@ def download_image(url: str) -> Image.Image | None:
     except Exception as exc:
         print(f"  WARN download failed {url}: {exc}")
         return None
-
-
-def _to_numpy_features(raw, projection_layer=None) -> np.ndarray:
-    if hasattr(raw, "cpu"):
-        return raw.cpu().numpy()
-
-    pooled = getattr(raw, "pooler_output", None)
-    if pooled is None:
-        raise TypeError(f"Unsupported feature output type: {type(raw)}")
-
-    if projection_layer is not None:
-        in_features = getattr(projection_layer, "in_features", None)
-        if in_features is None or pooled.shape[-1] == in_features:
-            pooled = projection_layer(pooled)
-
-    return pooled.cpu().numpy()
 
 
 def _build_image_encoder():
@@ -127,7 +111,9 @@ def _build_image_encoder():
         with torch.no_grad():
             inputs = processor(images=[image], return_tensors="pt")
             raw = model.get_image_features(**inputs)
-            features = _to_numpy_features(raw, projection_layer=getattr(model, "visual_projection", None))
+            features = clip_features_to_numpy(
+                raw, projection_layer=getattr(model, "visual_projection", None)
+            )
         return features[0]
 
     return _encode, {
@@ -190,7 +176,12 @@ def encode_all() -> None:
                 extras = [
                     (oid, name, url)
                     for (oid, name, url) in db_all
-                    if not _in_csv(name=name or "", url=url or "", csv_urls=csv_urls, csv_names=csv_names)
+                    if not _in_csv(
+                        name=name or "",
+                        url=url or "",
+                        csv_urls=csv_urls,
+                        csv_names=csv_names,
+                    )
                 ]
                 if extras:
                     print(

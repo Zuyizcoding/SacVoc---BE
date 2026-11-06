@@ -1,6 +1,5 @@
 from collections.abc import Generator
 
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -10,7 +9,8 @@ from app.api.endpoints.analyze import get_gemini_client
 from app.db.database import Base, get_db
 from app.main import app
 from app.schemas.outfit import OutfitItem, OutfitRecommendResponse
-
+from app.services.analysis.errors import GeminiOverloadedError
+from app.services.analysis.photo_types import PhotoQualityReport, ProcessedImage
 
 TEST_DEVICE_ID = "a" * 64
 QUALITY_FLAGS = {
@@ -46,13 +46,7 @@ class _FakeGeminiClient:
                 "advice": "Ưu tiên bảng màu ấm và trầm.",
             }
         if self.overload_body:
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "error_code": "AI_OVERLOADED",
-                    "message": "Gemini đang quá tải",
-                },
-            )
+            raise GeminiOverloadedError("overloaded")
         return {
             "shape": "Rectangle",
             "confidence": 0.79,
@@ -84,9 +78,7 @@ def _override_db(session_factory) -> Generator[Session, None, None]:
 
 def _make_client(monkeypatch, fake_client: _FakeGeminiClient) -> TestClient:
     engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
     testing_session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     Base.metadata.create_all(bind=engine)
@@ -96,12 +88,12 @@ def _make_client(monkeypatch, fake_client: _FakeGeminiClient) -> TestClient:
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_gemini_client] = lambda: fake_client
-
     monkeypatch.setattr(
-        "app.api.endpoints.analyze.preprocess_image_for_ai",
-        lambda file_bytes, max_kb=1000: (file_bytes, QUALITY_FLAGS.copy()),
+        "app.services.analysis.workflows.preprocess_image_for_ai",
+        lambda file_bytes, max_kb=1000: ProcessedImage(
+            file_bytes, PhotoQualityReport(**QUALITY_FLAGS)
+        ),
     )
-
     return TestClient(app)
 
 
@@ -127,7 +119,6 @@ def test_api_golden_path_color_body_history_and_outfit(monkeypatch) -> None:
             ],
         ),
     )
-
     with _make_client(monkeypatch, fake_client) as client:
         color_response = client.post(
             "/api/v1/analyze/color",
@@ -136,7 +127,6 @@ def test_api_golden_path_color_body_history_and_outfit(monkeypatch) -> None:
         )
         assert color_response.status_code == 200
         assert color_response.json()["data"]["analysis_source"] == "live"
-
         body_response = client.post(
             "/api/v1/analyze/body",
             headers={"X-Device-ID": TEST_DEVICE_ID},
@@ -144,19 +134,15 @@ def test_api_golden_path_color_body_history_and_outfit(monkeypatch) -> None:
         )
         assert body_response.status_code == 200
         assert body_response.json()["data"]["analysis_source"] == "live"
-
         history_response = client.get(
-            "/api/v1/analyze/history",
-            headers={"X-Device-ID": TEST_DEVICE_ID},
+            "/api/v1/analyze/history", headers={"X-Device-ID": TEST_DEVICE_ID}
         )
         history_payload = history_response.json()["data"]
         assert history_response.status_code == 200
         assert history_payload["color"]["sub_season"] == "Soft Autumn"
         assert history_payload["body"]["shape"] == "Rectangle"
-
         outfit_response = client.get(
-            "/api/v1/outfits/recommend",
-            headers={"X-Device-ID": TEST_DEVICE_ID},
+            "/api/v1/outfits/recommend", headers={"X-Device-ID": TEST_DEVICE_ID}
         )
         outfit_payload = outfit_response.json()["data"]
         assert outfit_response.status_code == 200
@@ -166,13 +152,11 @@ def test_api_golden_path_color_body_history_and_outfit(monkeypatch) -> None:
             "fit_match",
             "formality_match",
         ]
-
     app.dependency_overrides.clear()
 
 
 def test_api_body_fallback_marks_degraded_demo_source(monkeypatch) -> None:
     fake_client = _FakeGeminiClient(overload_body=True)
-
     with _make_client(monkeypatch, fake_client) as client:
         response = client.post(
             "/api/v1/analyze/body",
@@ -182,12 +166,9 @@ def test_api_body_fallback_marks_degraded_demo_source(monkeypatch) -> None:
         payload = response.json()["data"]
         assert response.status_code == 200
         assert payload["analysis_source"] == "degraded_demo"
-
         history_response = client.get(
-            "/api/v1/analyze/history",
-            headers={"X-Device-ID": TEST_DEVICE_ID},
+            "/api/v1/analyze/history", headers={"X-Device-ID": TEST_DEVICE_ID}
         )
         history_payload = history_response.json()["data"]
         assert history_payload["body"]["analysis_source"] == "degraded_demo"
-
     app.dependency_overrides.clear()

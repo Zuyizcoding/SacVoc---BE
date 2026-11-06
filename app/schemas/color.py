@@ -1,17 +1,11 @@
-"""
-Pydantic schemas cho F1 — Phân tích màu sắc cá nhân.
-Tuân thủ: backend-python #3 — Type Hints cho mọi field.
+"""Schema suy luận F1 và kết quả được enrich từ bảng mùa sắc."""
 
-LƯU Ý:
-- ColorInferenceResponse là schema mỏng truyền vào Gemini `response_schema`.
-- Backend sẽ enrich thêm palette/makeup/menswear trước khi trả ColorApiResponse.
-"""
-from pydantic import BaseModel, Field
-from pydantic import model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 class MakeupGuide(BaseModel):
     """Hướng dẫn trang điểm theo sub-season."""
+
     lip: list[str] = Field(description="3 màu son phù hợp")
     eye: list[str] = Field(description="3 màu phấn mắt phù hợp")
     hair: list[str] = Field(description="2-3 màu tóc phù hợp")
@@ -19,6 +13,7 @@ class MakeupGuide(BaseModel):
 
 class MenswearGuide(BaseModel):
     """Quick styling directions for male-focused color output."""
+
     tops: list[str] = Field(description="3 nhóm màu áo hoặc layer nên ưu tiên")
     bottoms: list[str] = Field(description="3 nhóm màu quần nên phối dễ nhất")
     accessories: list[str] = Field(description="2-3 gợi ý phụ kiện/kim loại phù hợp")
@@ -60,7 +55,9 @@ class ColorInferenceResponse(BaseModel):
         default=None,
         description="Sub-season thứ 2 có thể, nếu không chắc có thể bỏ trống",
     )
-    explanation: str | None = Field(default=None, description="2-3 câu tiếng Việt giải thích lý do")
+    explanation: str | None = Field(
+        default=None, description="2-3 câu tiếng Việt giải thích lý do"
+    )
     advice: str | None = Field(
         default=None,
         description="1-2 câu lời khuyên ngắn gọn tiếng Việt, ưu tiên trang phục nam",
@@ -92,7 +89,9 @@ class ColorInferenceResponse(BaseModel):
 
         # Success path: require only the irreducible field from Gemini.
         if not self.sub_season:
-            raise ValueError("Missing required fields for successful analysis: sub_season")
+            raise ValueError(
+                "Missing required fields for successful analysis: sub_season"
+            )
 
         return self
 
@@ -103,6 +102,7 @@ class ColorGeminiResponse(ColorInferenceResponse):
 
 class ColorApiResponse(BaseModel):
     """Response trả về cho Flutter — sau khi override palette từ season_data.py."""
+
     sub_season: str
     primary_season: str
     confidence: float
@@ -111,7 +111,7 @@ class ColorApiResponse(BaseModel):
     photo_quality_band: str | None = None
     secondary_season: str
     explanation: str
-    palette: list[str]       # 6 hex — override từ season_data.py (Tính năng #20)
+    palette: list[str]  # 6 hex — override từ season_data.py (Tính năng #20)
     makeup: MakeupGuide
     advice: str
     menswear: MenswearGuide | None = None

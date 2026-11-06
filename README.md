@@ -10,7 +10,7 @@ API backend cho ứng dụng mobile **Sắc Vóc**: phân tích màu sắc cá n
 | Database | SQLite + SQLAlchemy |
 | Python | **3.12+** |
 
-Repo frontend: [`CS4153.Q24.CTTT---FE`](../CS4153.Q24.CTTT---FE) (Flutter).
+Repo frontend: [`SacVoc---FE`](../SacVoc---FE) (Flutter).
 
 ---
 
@@ -67,7 +67,7 @@ outfitseed.csv       # Nguồn seed catalog
 ### 1. Môi trường
 
 ```bash
-cd CS4153.Q24.CTTT---BE
+cd SacVoc---BE
 python -m venv .venv
 
 # Windows
@@ -166,10 +166,16 @@ pytest tests/test_api_demo_smoke.py -q
 
 - Mount volume cho SQLite production: `DATABASE_URL=sqlite:////data/sac_voc.db`
 - Upload `sac_voc.db` đã seed + giữ `data/query_vectors.json` trên server.
-- Đổi `baseUrl` ở Flutter (`lib/core/constants/api_constants.dart`) trỏ tới URL public.
+- Truyền URL backend khi chạy Flutter bằng `--dart-define=API_BASE_URL=https://<domain-của-be>`.
 
 ---
 
 ## License / nhóm
 
 Dự án môn học **CS4153** — UIT. Liên hệ nhóm phát triển qua repository Git của course.
+
+## Dành cho người mới
+
+Bắt đầu tại [kiến trúc và luồng chạy](docs/architecture.md), sau đó đọc [setup/tests](docs/development.md) và [ba ví dụ thay đổi](docs/change-recipes.md). F1/F2 hiện được điều phối trong `app/services/analysis/workflows.py`; F3 có các bước riêng trong `app/services/recommendation/`. Endpoint chỉ xử lý HTTP.
+
+Kết quả kiểm thử và đối chiếu trước/sau được ghi tại [nghiệm thu refactor](docs/refactor-verification.md).

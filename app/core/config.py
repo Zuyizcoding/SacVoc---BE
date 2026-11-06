@@ -1,7 +1,5 @@
-"""
-Cấu hình ứng dụng — load từ .env.
-Tuân thủ: backend-python #4 — pydantic-settings, không hard-code key.
-"""
+"""Đọc cấu hình môi trường bằng Pydantic Settings."""
+
 from typing import Any
 
 from pydantic import field_validator
@@ -40,13 +38,27 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             normalized = value.strip().lower()
             if normalized in {
-                "1", "true", "t", "yes", "y", "on",
-                "debug", "development", "dev",
+                "1",
+                "true",
+                "t",
+                "yes",
+                "y",
+                "on",
+                "debug",
+                "development",
+                "dev",
             }:
                 return True
             if normalized in {
-                "0", "false", "f", "no", "n", "off",
-                "release", "prod", "production",
+                "0",
+                "false",
+                "f",
+                "no",
+                "n",
+                "off",
+                "release",
+                "prod",
+                "production",
             }:
                 return False
         return value

@@ -1,9 +1,10 @@
-from app.api.endpoints.analyze import (
-    _build_body_medium_quality_hint_prompt,
+from app.services.analysis.photo_quality import (
     _color_close_up_guidance_message,
-    _should_bias_body_best_effort,
-    _should_return_color_close_up_guidance,
+    needs_body_quality_hint,
+    needs_color_quality_hint,
 )
+from app.services.analysis.photo_types import PhotoQualityReport
+from app.services.analysis.prompts import _build_body_medium_quality_hint_prompt
 from app.utils.image_utils import (
     _is_far_subject_for_color,
     _is_soft_bad_lighting,
@@ -17,20 +18,14 @@ from app.utils.image_utils import (
 
 
 def test_color_guidance_triggers_for_far_subject_photo() -> None:
-    quality_flags = {
-        "soft_far_subject_for_color": True,
-    }
-
-    assert _should_return_color_close_up_guidance(quality_flags) is True
+    quality_flags = PhotoQualityReport(**{"soft_far_subject_for_color": True})
+    assert needs_color_quality_hint(quality_flags) is True
     assert "selfie gần hơn" in _color_close_up_guidance_message(quality_flags)
 
 
 def test_color_guidance_does_not_trigger_for_close_up_photo() -> None:
-    quality_flags = {
-        "soft_far_subject_for_color": False,
-    }
-
-    assert _should_return_color_close_up_guidance(quality_flags) is False
+    quality_flags = PhotoQualityReport(**{"soft_far_subject_for_color": False})
+    assert needs_color_quality_hint(quality_flags) is False
 
 
 def test_far_subject_heuristic_triggers_for_small_subject_photo() -> None:
@@ -51,7 +46,7 @@ def test_far_subject_heuristic_skips_soft_but_close_selfie() -> None:
             portrait_ratio=1.33,
             detail_score=5.39,
             face_hint_detail=6.66,
-            upper_center_detail=6.10,
+            upper_center_detail=6.1,
         )
         is False
     )
@@ -63,7 +58,7 @@ def test_soft_bad_lighting_ignores_white_background_when_face_region_is_ok() -> 
             global_brightness=198.42,
             global_contrast=68.12,
             face_brightness=138.67,
-            face_contrast=58.90,
+            face_contrast=58.9,
             face_neck_brightness=144.16,
             face_neck_contrast=59.74,
         )
@@ -86,24 +81,27 @@ def test_soft_bad_lighting_triggers_for_overexposed_face_region() -> None:
 
 
 def test_body_best_effort_bias_for_medium_quality_full_body() -> None:
-    quality_flags = {
-        "soft_low_detail": True,
-        "soft_low_resolution": False,
-        "soft_bad_lighting": False,
-        "soft_color_cast": False,
-        "detail_score": 5.33,
-    }
-
-    assert _should_bias_body_best_effort(quality_flags) is True
+    quality_flags = PhotoQualityReport(
+        **{
+            "soft_low_detail": True,
+            "soft_low_resolution": False,
+            "soft_bad_lighting": False,
+            "soft_color_cast": False,
+            "detail_score": 5.33,
+        }
+    )
+    assert needs_body_quality_hint(quality_flags) is True
     prompt = _build_body_medium_quality_hint_prompt(quality_flags)
     assert "best-effort" in prompt
     assert "CLOTHING_TOO_WIDE" in prompt
 
 
-def test_weighted_photo_quality_score_is_high_for_clear_face_and_balanced_light() -> None:
+def test_weighted_photo_quality_score_is_high_for_clear_face_and_balanced_light() -> (
+    None
+):
     photo_quality_score = (
         0.12 * _score_resolution_quality(787, 787 * 989)
-        + 0.30 * _score_detail_quality(8.05, 19.97, 16.95)
+        + 0.3 * _score_detail_quality(8.05, 19.97, 16.95)
         + 0.24
         * _score_lighting_quality(
             global_brightness=198.42,
@@ -120,7 +118,6 @@ def test_weighted_photo_quality_score_is_high_for_clear_face_and_balanced_light(
             far_subject_for_color=False,
         )
     )
-
     assert photo_quality_score > 0.85
     assert _photo_quality_band(photo_quality_score) == "excellent"
 
@@ -128,7 +125,7 @@ def test_weighted_photo_quality_score_is_high_for_clear_face_and_balanced_light(
 def test_weighted_photo_quality_score_drops_for_soft_far_subject_photo() -> None:
     photo_quality_score = (
         0.12 * _score_resolution_quality(320, 320 * 480)
-        + 0.30 * _score_detail_quality(5.1, 5.6, 5.5)
+        + 0.3 * _score_detail_quality(5.1, 5.6, 5.5)
         + 0.24
         * _score_lighting_quality(
             global_brightness=170.0,
@@ -145,6 +142,5 @@ def test_weighted_photo_quality_score_drops_for_soft_far_subject_photo() -> None
             far_subject_for_color=True,
         )
     )
-
     assert photo_quality_score < 0.58
     assert _photo_quality_band(photo_quality_score) == "poor"

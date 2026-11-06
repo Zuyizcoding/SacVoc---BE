@@ -70,3 +70,4 @@ CLAUDE.md
 # --- Markdown: chỉ giữ README gốc (nếu có) ---
 *.md
 !/README.md
+!/docs/**/*.md

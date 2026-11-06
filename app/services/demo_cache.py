@@ -1,14 +1,8 @@
-"""
-Demo Cache System (Tính năng #14).
+"""Đọc kết quả mẫu khi AI quá tải; workflow gắn nguồn degraded_demo."""
 
-Lưu 5 bộ JSON kết quả cứng — khi Circuit Breaker mở,
-service layer đọc cache này thay vì gọi Gemini.
-
-Tuân thủ: architecture-standard #4 — không để hệ thống "chết" khi service con lỗi.
-"""
 import json
-import random
 import logging
+import random
 from pathlib import Path
 
 logger = logging.getLogger(__name__)

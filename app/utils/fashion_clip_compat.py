@@ -8,6 +8,8 @@ fashion-clip 0.2.2 expects older transformers APIs:
 
 from __future__ import annotations
 
+import numpy as np
+
 _PATCH_APPLIED = False
 
 
@@ -84,3 +86,19 @@ def load_fashion_clip(model_name: str = "fashion-clip"):
     fclip = FashionCLIP(model_name)
     patch_clip_model_feature_outputs(fclip.model)
     return fclip
+
+
+def clip_features_to_numpy(raw, projection_layer=None) -> np.ndarray:
+    if hasattr(raw, "cpu"):
+        return raw.cpu().numpy()
+
+    pooled = getattr(raw, "pooler_output", None)
+    if pooled is None:
+        raise TypeError(f"Unsupported feature output type: {type(raw)}")
+
+    if projection_layer is not None:
+        in_features = getattr(projection_layer, "in_features", None)
+        if in_features is None or pooled.shape[-1] == in_features:
+            pooled = projection_layer(pooled)
+
+    return pooled.cpu().numpy()
