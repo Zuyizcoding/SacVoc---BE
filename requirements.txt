@@ -26,7 +26,7 @@ pydantic-settings==2.7.1
 sqlalchemy==2.0.37
 
 # AI / Gemini
-google-generativeai==0.8.4
+google-genai==1.56.0
 
 # Image Processing
 Pillow==11.1.0

@@ -1,0 +1,22 @@
+# Allow-list runtime source; exclude secrets, user DBs, notebooks and Git state.
+**
+!Dockerfile
+!requirements.txt
+!app/
+!app/**
+!data/
+!data/**
+
+**/__pycache__/
+**/*.pyc
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite-*
+**/*.sqlite3
+**/*.sqlite3-*
+**/.env*
+**/*.pt
+**/*.pth
+**/*.safetensors
+**/*.bin

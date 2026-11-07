@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.db.database import SessionLocal, init_db
 from app.db.models import Outfit
-from app.services.recommendation.types import EMBEDDING_SCHEMA_VERSION
+from app.services.recommendation.types import PROJECTED_EMBEDDING_VERSION
 from app.utils.fashion_clip_compat import clip_features_to_numpy, load_fashion_clip
 
 
@@ -86,7 +86,7 @@ def _build_image_encoder():
         return _encode, {
             "backend": "fashion_clip",
             "model": "fashion-clip",
-            "version": EMBEDDING_SCHEMA_VERSION,
+            "version": PROJECTED_EMBEDDING_VERSION,
         }
     except Exception as exc:
         print(f"FashionCLIP unavailable, fallback to transformers CLIP: {exc}")
@@ -111,15 +111,13 @@ def _build_image_encoder():
         with torch.no_grad():
             inputs = processor(images=[image], return_tensors="pt")
             raw = model.get_image_features(**inputs)
-            features = clip_features_to_numpy(
-                raw, projection_layer=getattr(model, "visual_projection", None)
-            )
+            features = clip_features_to_numpy(raw)
         return features[0]
 
     return _encode, {
         "backend": "hf_clip",
         "model": "openai/clip-vit-base-patch32",
-        "version": EMBEDDING_SCHEMA_VERSION,
+        "version": PROJECTED_EMBEDDING_VERSION,
     }
 
 

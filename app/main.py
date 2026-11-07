@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.endpoints import analyze, outfit
 from app.core.config import settings
 from app.db.database import SessionLocal, init_db
+from app.services.gemini_client import close_gemini_client
 from app.services.outfit_service import get_recommendation_readiness
 
 
@@ -15,8 +16,10 @@ from app.services.outfit_service import get_recommendation_readiness
 async def lifespan(app: FastAPI):
     """Startup: tạo bảng DB nếu chưa có. Shutdown: cleanup nếu cần."""
     init_db()
-    yield
-    # Shutdown logic (nếu có) đặt ở đây
+    try:
+        yield
+    finally:
+        close_gemini_client()
 
 
 app = FastAPI(

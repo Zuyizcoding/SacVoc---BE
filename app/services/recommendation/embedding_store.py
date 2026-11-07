@@ -8,11 +8,11 @@ from pathlib import Path
 import numpy as np
 
 from app.core.config import settings
-from app.utils.fashion_clip_compat import load_fashion_clip
+from app.utils.fashion_clip_compat import clip_features_to_numpy, load_fashion_clip
 
 from .query_builder import _current_query_signature
 from .types import (
-    EMBEDDING_SCHEMA_VERSION,
+    PROJECTED_EMBEDDING_VERSION,
     QueryVectorBundle,
     RecommendationNotReadyError,
 )
@@ -26,7 +26,7 @@ class RuntimeFashionClipTextEncoder:
     def __init__(self, model_name: str) -> None:
         self._backend = "unknown"
         self._model_name = model_name
-        self._version = EMBEDDING_SCHEMA_VERSION
+        self._version = PROJECTED_EMBEDDING_VERSION
         self._model = None
         self._processor = None
 
@@ -62,19 +62,7 @@ class RuntimeFashionClipTextEncoder:
                 truncation=True,
             )
             raw = self._model.get_text_features(**inputs)
-            if hasattr(raw, "cpu"):
-                features = raw
-            else:
-                pooled = getattr(raw, "pooler_output", None)
-                if pooled is None:
-                    raise TypeError(f"Unsupported text feature output: {type(raw)}")
-                projection = getattr(self._model, "text_projection", None)
-                if projection is not None:
-                    in_features = getattr(projection, "in_features", None)
-                    if in_features is None or pooled.shape[-1] == in_features:
-                        pooled = projection(pooled)
-                features = pooled
-        return features.cpu().numpy()
+        return clip_features_to_numpy(raw)
 
     @property
     def backend(self) -> str:

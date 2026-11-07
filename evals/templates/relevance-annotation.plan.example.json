@@ -1,0 +1,19 @@
+{
+  "dataset_id": "replace-with-your-dataset",
+  "version": "1",
+  "synthetic": false,
+  "annotation_protocol": "Replace with the independent relevance rubric and its version.",
+  "cases": [
+    {
+      "case_id": "profile-001",
+      "subject_id": "subject-001",
+      "split": "dev",
+      "profile": {
+        "color_sub_season": "Soft Autumn",
+        "body_shape": "Rectangle",
+        "occasion": "daily",
+        "gender": "male"
+      }
+    }
+  ]
+}

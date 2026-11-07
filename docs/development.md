@@ -8,7 +8,7 @@ Dùng Python 3.12+; `.python-version` ghi 3.12.13. Các lệnh sau chạy ở th
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-pip install pytest==8.3.4 httpx==0.28.1 ruff==0.9.4
+pip install -r requirements-test.txt
 Copy-Item .env.example .env
 ```
 
@@ -28,7 +28,13 @@ ruff check app scripts tests
 ruff format --check app scripts tests
 ```
 
-`tests/conftest.py` đặt DB trong bộ nhớ và khóa giả trước khi import app. Tests không cần `.env`, không gọi Gemini, không tải FashionCLIP và không sửa DB demo. Tests của client dùng SDK giả và bỏ thời gian chờ backoff. Tests F3 dùng vectors cố định và kiểm tra query signature đã commit.
+`tests/conftest.py` đặt DB trong bộ nhớ và khóa giả trước khi import app. Tests không cần `.env`, không gọi Gemini, không tải FashionCLIP và không sửa DB demo. Client tests cover the real pinned SDK over fake HTTP as well as scripted inference; backoff waits are disabled in tests. Tests F3 dùng vectors cố định và kiểm tra query signature đã commit.
+
+See the English [evaluation guide](evaluation.md) for the isolated runner, dataset schemas, pipeline intuition, metrics, and synthetic smoke commands.
+
+See [experiments.md](experiments.md) for F3 ablation, paired analysis comparisons,
+and commands matching the backend GitHub Actions workflow. The lightweight
+test requirements do not install FashionCLIP or Torch.
 
 ## Catalog và embeddings
 
@@ -44,7 +50,7 @@ Các lệnh seed/encode ghi DB hoặc file vectors. `--dry-run` của seed/prune
 
 ## Khi gặp lỗi
 
-- Import settings thất bại: ứng dụng cần khóa Gemini qua môi trường hoặc `.env`; tests đã tự thiết lập khóa giả.
+- Missing Gemini key: offline schema/evaluation tools can import settings without credentials. Constructing a real Gemini client requires `GEMINI_API_KEY` in the environment or `.env`; the synthetic provider needs no key.
 - F3 chưa sẵn sàng: xem `/health/ready`; kiểm tra có catalog, vector thật và metadata cùng backend/model/version.
 - Query signature không khớp: template và vectors thuộc hai phiên bản khác nhau. Khôi phục bộ đồng bộ hoặc chủ động encode lại cả bộ khi thực sự đổi template.
 - AI hiển thị demo: xem `analysis_source` và log retry/breaker; kiểm tra quota và cấu hình timeout.

@@ -1,0 +1,32 @@
+{
+  "dataset_id": "replace-with-your-dataset",
+  "version": "1",
+  "synthetic": false,
+  "reference_kind": "human_consensus",
+  "annotation_protocol": "Replace with the protocol version and independent-rater procedure.",
+  "cases": [
+    {
+      "case_id": "subject-001-color",
+      "subject_id": "subject-001",
+      "feature": "color",
+      "split": "dev",
+      "image_path": "images/subject-001-color.jpg",
+      "consent_confirmed": false,
+      "reference": {
+        "primary_season": "Autumn",
+        "sub_season": "Soft Autumn"
+      }
+    },
+    {
+      "case_id": "subject-002-body",
+      "subject_id": "subject-002",
+      "feature": "body",
+      "split": "test",
+      "image_path": "images/subject-002-body.jpg",
+      "consent_confirmed": false,
+      "reference": {
+        "shape": "Rectangle"
+      }
+    }
+  ]
+}

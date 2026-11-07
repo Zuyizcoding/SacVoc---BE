@@ -13,7 +13,7 @@ from app.services.recommendation.query_builder import (
     _all_query_templates,
     _current_query_signature,
 )
-from app.services.recommendation.types import EMBEDDING_SCHEMA_VERSION
+from app.services.recommendation.types import PROJECTED_EMBEDDING_VERSION
 from app.utils.fashion_clip_compat import clip_features_to_numpy, load_fashion_clip
 
 
@@ -29,7 +29,7 @@ def encode_queries() -> None:
         meta = {
             "backend": "fashion_clip",
             "model": "fashion-clip",
-            "version": EMBEDDING_SCHEMA_VERSION,
+            "version": PROJECTED_EMBEDDING_VERSION,
         }
     except Exception as exc:
         print(f"FashionCLIP unavailable, fallback to transformers CLIP: {exc}")
@@ -59,13 +59,11 @@ def encode_queries() -> None:
                 truncation=True,
             )
             raw = model.get_text_features(**inputs)
-            text_embeddings = clip_features_to_numpy(
-                raw, projection_layer=getattr(model, "text_projection", None)
-            )
+            text_embeddings = clip_features_to_numpy(raw)
         meta = {
             "backend": "hf_clip",
             "model": "openai/clip-vit-base-patch32",
-            "version": EMBEDDING_SCHEMA_VERSION,
+            "version": PROJECTED_EMBEDDING_VERSION,
         }
 
     norms = np.linalg.norm(text_embeddings, axis=1, keepdims=True)

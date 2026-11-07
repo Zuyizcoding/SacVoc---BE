@@ -1,0 +1,23 @@
+{
+  "dataset_id": "synthetic-ranking",
+  "version": "1",
+  "synthetic": true,
+  "cases": [
+    {
+      "case_id": "query-one",
+      "relevance": {
+        "1": 3,
+        "2": 2,
+        "3": 0,
+        "4": 1
+      }
+    },
+    {
+      "case_id": "query-missing",
+      "relevance": {
+        "1": 1,
+        "2": 0
+      }
+    }
+  ]
+}

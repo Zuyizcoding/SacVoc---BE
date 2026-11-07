@@ -18,6 +18,7 @@ from app.main import app
 from app.services.analysis.errors import GeminiOverloadedError
 from app.services.analysis.photo_types import PhotoQualityReport, ProcessedImage
 from app.services.demo_cache import get_demo_body_result
+from app.services.gemini_client import GeminiSafetyBlockedError
 
 DEVICE_HEADERS = {"X-Device-ID": "a" * 64}
 COLOR = {
@@ -160,6 +161,19 @@ def test_incomplete_body_is_not_saved(api_client, monkeypatch):
     assert response.json()["error_code"] == "AI_INCOMPLETE"
     history = api_client.get("/api/v1/analyze/history", headers=DEVICE_HEADERS).json()
     assert history["data"]["body"] is None
+
+
+@pytest.mark.parametrize("feature", ["color", "body"])
+def test_safety_block_preserves_incomplete_response_contract(
+    api_client, monkeypatch, feature
+):
+    fake = configure_ai(monkeypatch, [GeminiSafetyBlockedError("blocked")])
+    response = upload(api_client, feature)
+    assert response.status_code == 503
+    assert response.json()["detail"]["error_code"] == "AI_INCOMPLETE"
+    assert len(fake.calls) == 1
+    history = api_client.get("/api/v1/analyze/history", headers=DEVICE_HEADERS).json()
+    assert history["data"][feature] is None
 
 
 def test_recommendation_requires_both_analyses(api_client):

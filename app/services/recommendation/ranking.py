@@ -1,11 +1,11 @@
 """Chấm điểm và chọn đa dạng; bảo toàn trọng số đang dùng cho demo."""
 
 from collections import Counter
+from collections.abc import Sequence
 
 import numpy as np
 
 from app.data.body_shapes import canonicalize_recommendation_shape
-from app.db.models import Outfit
 
 from .query_builder import (
     BODY_SHAPE_COMPATIBILITY,
@@ -13,7 +13,7 @@ from .query_builder import (
     _parse_bias_tags,
     _primary_season,
 )
-from .types import RankedCandidate
+from .types import RankableOutfit, RankedCandidate
 
 # Trọng số heuristic hiện tại; chưa phải xác suất đúng hoặc trọng số đã học.
 SEMANTIC_WEIGHT = 0.56
@@ -52,7 +52,7 @@ def _cosine_similarity_search(
 
 
 def _season_alignment_score(
-    outfit: Outfit, color_sub_season: str
+    outfit: RankableOutfit, color_sub_season: str
 ) -> tuple[float, list[str]]:
     reasons: list[str] = []
     bias = _parse_bias_tags(outfit.season_bias)
@@ -74,7 +74,7 @@ def _season_alignment_score(
 
 
 def _body_shape_alignment_score(
-    outfit: Outfit, body_shape: str
+    outfit: RankableOutfit, body_shape: str
 ) -> tuple[float, list[str]]:
     reasons: list[str] = []
     bias = _parse_bias_tags(outfit.body_shape_bias)
@@ -94,7 +94,7 @@ def _body_shape_alignment_score(
 
 
 def _color_family_bonus(
-    outfit: Outfit, color_sub_season: str
+    outfit: RankableOutfit, color_sub_season: str
 ) -> tuple[float, list[str]]:
     reasons: list[str] = []
     family = str(outfit.color_family or "").strip().casefold()
@@ -108,7 +108,7 @@ def _color_family_bonus(
     return (0.25, reasons)
 
 
-def _fit_bonus(outfit: Outfit, body_shape: str) -> tuple[float, list[str]]:
+def _fit_bonus(outfit: RankableOutfit, body_shape: str) -> tuple[float, list[str]]:
     reasons: list[str] = []
     fit = str(outfit.fit or "").strip().casefold()
     canonical = canonicalize_recommendation_shape(body_shape)
@@ -127,7 +127,7 @@ def _fit_bonus(outfit: Outfit, body_shape: str) -> tuple[float, list[str]]:
     return (0.3, reasons)
 
 
-def _formality_bonus(outfit: Outfit, occasion: str) -> tuple[float, list[str]]:
+def _formality_bonus(outfit: RankableOutfit, occasion: str) -> tuple[float, list[str]]:
     reasons: list[str] = []
     formality = str(outfit.formality or "").strip().casefold()
     if not formality:
@@ -145,7 +145,7 @@ def _formality_bonus(outfit: Outfit, occasion: str) -> tuple[float, list[str]]:
 
 
 def _rank_candidates(
-    outfits: list[Outfit],
+    outfits: Sequence[RankableOutfit],
     raw_scores: np.ndarray,
     *,
     color_sub_season: str,

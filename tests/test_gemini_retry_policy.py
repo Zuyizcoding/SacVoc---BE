@@ -4,7 +4,7 @@ import asyncio
 import json
 
 import pytest
-from google.api_core import exceptions as google_errors
+from google.genai import errors as google_errors
 
 from app.core.config import settings
 from app.schemas.color import ColorInferenceResponse
@@ -17,7 +17,7 @@ class ScriptedModel:
         self.results = iter(results)
         self.calls = 0
 
-    def generate_content(self, *args, **kwargs):
+    async def generate_content(self, *args, **kwargs):
         self.calls += 1
         result = next(self.results)
         if isinstance(result, Exception):
@@ -34,7 +34,7 @@ def run_client(monkeypatch, results, *, initial_errors=0):
     async def sleep(delay):
         delays.append(delay)
 
-    monkeypatch.setattr(client, "_build_model", lambda *args: model)
+    monkeypatch.setattr(client, "_generate_once", model.generate_content)
     monkeypatch.setattr("app.services.gemini_client.asyncio.sleep", sleep)
     monkeypatch.setattr("app.services.gemini_client.random.uniform", lambda *args: 0)
     for _ in range(initial_errors):
@@ -51,9 +51,9 @@ def analyze(client):
 @pytest.mark.parametrize(
     "failure,delay",
     [
-        (google_errors.ResourceExhausted("quota"), 1.5),
-        (google_errors.ServiceUnavailable("busy"), 1.0),
-        (google_errors.InternalServerError("server"), 1.0),
+        (google_errors.ClientError(429, {"message": "quota"}), 1.5),
+        (google_errors.ServerError(503, {"message": "busy"}), 1.0),
+        (google_errors.ServerError(500, {"message": "server"}), 1.0),
         (TimeoutError("timeout"), 1.0),
         ({}, 0.75),
     ],
@@ -72,7 +72,9 @@ def test_retry_then_success_preserves_delay_and_resets_breaker(
 
 def test_busy_error_stops_when_breaker_opens_mid_loop(monkeypatch):
     client, model, delays = run_client(
-        monkeypatch, [google_errors.ServiceUnavailable("busy")], initial_errors=1
+        monkeypatch,
+        [google_errors.ServerError(503, {"message": "busy"})],
+        initial_errors=1,
     )
     with pytest.raises(GeminiOverloadedError):
         analyze(client)
@@ -83,7 +85,10 @@ def test_busy_error_stops_when_breaker_opens_mid_loop(monkeypatch):
 def test_quota_keeps_remaining_attempt_even_when_breaker_opens(monkeypatch):
     client, model, _ = run_client(
         monkeypatch,
-        [google_errors.ResourceExhausted("quota"), {"sub_season": "Soft Autumn"}],
+        [
+            google_errors.ClientError(429, {"message": "quota"}),
+            {"sub_season": "Soft Autumn"},
+        ],
         initial_errors=1,
     )
     assert analyze(client)["sub_season"] == "Soft Autumn"
@@ -92,7 +97,7 @@ def test_quota_keeps_remaining_attempt_even_when_breaker_opens(monkeypatch):
 
 def test_exhausted_quota_opens_breaker_and_next_request_fails_fast(monkeypatch):
     client, model, _ = run_client(
-        monkeypatch, [google_errors.ResourceExhausted("quota")] * 2
+        monkeypatch, [google_errors.ClientError(429, {"message": "quota"})] * 2
     )
     with pytest.raises(GeminiOverloadedError):
         analyze(client)

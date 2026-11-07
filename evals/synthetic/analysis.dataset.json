@@ -1,0 +1,253 @@
+{
+  "dataset_id": "synthetic-pipeline-smoke",
+  "version": "1",
+  "synthetic": true,
+  "reference_kind": "synthetic",
+  "annotation_protocol": "Artificial labels for software checks only. No human photo or AI quality claim.",
+  "cases": [
+    {
+      "case_id": "color-complete",
+      "subject_id": "color-complete",
+      "feature": "color",
+      "split": "dev",
+      "reference": {
+        "primary_season": "Autumn",
+        "sub_season": "Soft Autumn"
+      },
+      "synthetic_replies": [
+        {
+          "payload": {
+            "sub_season": "Soft Autumn",
+            "confidence": 0.84,
+            "secondary_season": "True Autumn",
+            "explanation": "Synthetic color explanation.",
+            "advice": "Synthetic advice."
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "color-repair",
+      "subject_id": "color-repair",
+      "feature": "color",
+      "split": "dev",
+      "reference": {
+        "primary_season": "Autumn",
+        "sub_season": "Soft Autumn"
+      },
+      "synthetic_replies": [
+        {
+          "payload": {
+            "sub_season": "Soft Autumn"
+          }
+        },
+        {
+          "payload": {
+            "sub_season": "Soft Autumn",
+            "confidence": 0.84,
+            "secondary_season": "True Autumn",
+            "explanation": "Synthetic color explanation.",
+            "advice": "Synthetic advice."
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "color-malformed",
+      "subject_id": "color-malformed",
+      "feature": "color",
+      "split": "dev",
+      "reference": {
+        "primary_season": "Autumn",
+        "sub_season": "Soft Autumn"
+      },
+      "synthetic_replies": [
+        {
+          "raw_text": "not JSON"
+        },
+        {
+          "raw_text": "still not JSON"
+        }
+      ]
+    },
+    {
+      "case_id": "color-overload",
+      "subject_id": "color-overload",
+      "feature": "color",
+      "split": "dev",
+      "reference": {
+        "primary_season": "Autumn",
+        "sub_season": "Soft Autumn"
+      },
+      "synthetic_replies": [
+        {
+          "http_status": 429
+        },
+        {
+          "http_status": 429
+        }
+      ]
+    },
+    {
+      "case_id": "body-complete",
+      "subject_id": "body-complete",
+      "feature": "body",
+      "split": "dev",
+      "reference": {
+        "shape": "Rectangle"
+      },
+      "synthetic_replies": [
+        {
+          "payload": {
+            "shape": "Rectangle",
+            "confidence": 0.79,
+            "measurements": {
+              "shoulder_relative": "balanced",
+              "hip_relative": "balanced",
+              "waist_definition": "minimal"
+            },
+            "styling_tips": [
+              "Synthetic tip one.",
+              "Synthetic tip two.",
+              "Synthetic tip three."
+            ],
+            "avoid": [
+              "Synthetic avoid one.",
+              "Synthetic avoid two."
+            ],
+            "explanation": "Synthetic proportions."
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "body-repair",
+      "subject_id": "body-repair",
+      "feature": "body",
+      "split": "dev",
+      "reference": {
+        "shape": "Rectangle"
+      },
+      "synthetic_replies": [
+        {
+          "payload": {
+            "shape": "Rectangle"
+          }
+        },
+        {
+          "payload": {
+            "shape": "Rectangle",
+            "confidence": 0.79,
+            "measurements": {
+              "shoulder_relative": "balanced",
+              "hip_relative": "balanced",
+              "waist_definition": "minimal"
+            },
+            "styling_tips": [
+              "Synthetic tip one.",
+              "Synthetic tip two.",
+              "Synthetic tip three."
+            ],
+            "avoid": [
+              "Synthetic avoid one.",
+              "Synthetic avoid two."
+            ],
+            "explanation": "Synthetic proportions."
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "body-clothing",
+      "subject_id": "body-clothing",
+      "feature": "body",
+      "split": "dev",
+      "reference": {
+        "shape": "Rectangle"
+      },
+      "synthetic_replies": [
+        {
+          "payload": {
+            "error_code": "CLOTHING_TOO_WIDE",
+            "message": "Synthetic clothing rejection."
+          }
+        },
+        {
+          "payload": {
+            "shape": "Rectangle",
+            "confidence": 0.79,
+            "measurements": {
+              "shoulder_relative": "balanced",
+              "hip_relative": "balanced",
+              "waist_definition": "minimal"
+            },
+            "styling_tips": [
+              "Synthetic tip one.",
+              "Synthetic tip two.",
+              "Synthetic tip three."
+            ],
+            "avoid": [
+              "Synthetic avoid one.",
+              "Synthetic avoid two."
+            ],
+            "explanation": "Synthetic proportions."
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "body-rejected",
+      "subject_id": "body-rejected",
+      "feature": "body",
+      "split": "dev",
+      "reference": {
+        "shape": "Rectangle"
+      },
+      "synthetic_replies": [
+        {
+          "payload": {
+            "error_code": "NO_PERSON_DETECTED",
+            "message": "Synthetic rejection."
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "body-incomplete",
+      "subject_id": "body-incomplete",
+      "feature": "body",
+      "split": "dev",
+      "reference": {
+        "shape": "Rectangle"
+      },
+      "synthetic_replies": [
+        {
+          "payload": {
+            "shape": "Rectangle"
+          }
+        },
+        {
+          "payload": {
+            "shape": "Rectangle"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "color-safety",
+      "subject_id": "color-safety",
+      "feature": "color",
+      "split": "dev",
+      "reference": {
+        "primary_season": "Autumn",
+        "sub_season": "Soft Autumn"
+      },
+      "synthetic_replies": [
+        {
+          "raw_text": "",
+          "finish_reason": "SAFETY"
+        }
+      ]
+    }
+  ]
+}

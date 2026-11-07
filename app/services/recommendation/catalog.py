@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Outfit
 
+from .catalog_policy import MALE_GENDER_ALIASES, unique_image_outfits
 from .types import SUPPORTED_EMBEDDING_BACKENDS, RecommendationNotReadyError
 
 
@@ -19,24 +20,14 @@ def _load_outfit_vectors(
     if occasion:
         query = query.filter(Outfit.occasion == occasion)
 
-    aliases = ("male", "m", "nam", "man", "men")
     if (gender or "").lower() == "male":
-        query = query.filter(func.lower(Outfit.gender).in_(aliases))
+        query = query.filter(func.lower(Outfit.gender).in_(MALE_GENDER_ALIASES))
 
     outfits = query.all()
     if not outfits:
         return ([], np.empty((0, 512), dtype=np.float32))
 
-    unique_outfits: list[Outfit] = []
-    seen_images: set[str] = set()
-    for outfit in outfits:
-        image_key = str(outfit.image_url or "").strip()
-        if image_key and image_key in seen_images:
-            continue
-        if image_key:
-            seen_images.add(image_key)
-        unique_outfits.append(outfit)
-    outfits = unique_outfits
+    outfits = unique_image_outfits(outfits)
 
     vectors: list[np.ndarray] = []
     for outfit in outfits:

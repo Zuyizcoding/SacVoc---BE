@@ -12,6 +12,37 @@ API backend cho ứng dụng mobile **Sắc Vóc**: phân tích màu sắc cá n
 
 Repo frontend: [`SacVoc---FE`](../SacVoc---FE) (Flutter).
 
+## Reproducible evaluation
+
+The backend uses `google-genai==1.56.0`. F1/F2 evaluation shares the production
+image/repair pipeline, disables demo fallback, and never writes user history.
+Start with the English [evaluation guide](docs/evaluation.md) for intuition,
+dataset schemas, pipeline tracing, metric definitions, and SDK migration details.
+
+Run the synthetic software smoke check after installing `requirements.txt`:
+
+```powershell
+python -m scripts.run_analysis_evaluation --dataset evals/synthetic/analysis.dataset.json --provider synthetic --split dev --output-dir build/evaluation/smoke-001
+```
+
+This command needs no API key or personal photos. Its reports demonstrate the
+evaluation machinery; they are not measurements of AI quality.
+
+For F3 baselines/ablation, paired A/B reports, and the lightweight backend CI,
+continue with [Experiments](docs/experiments.md). To run its offline CI smoke phase:
+
+```powershell
+python -m pip install -r requirements-test.txt
+python -m scripts.run_evaluation_smoke --output-dir build/experiments/smoke-001
+```
+
+For dataset preflight, read-only SQLite-to-snapshot export, and the optional CPU
+PyTorch notebook, see [Data preparation](docs/data-preparation.md).
+
+Continue with [Annotation and runtime](docs/annotation-and-runtime.md) for the
+independent F3 rating workflow, corrected legacy evaluator and Docker setup.
+See [Handoff](docs/handoff.md) for the inputs needed before real AI evaluation.
+
 ---
 
 ## Tính năng chính
@@ -179,3 +210,7 @@ Dự án môn học **CS4153** — UIT. Liên hệ nhóm phát triển qua repos
 Bắt đầu tại [kiến trúc và luồng chạy](docs/architecture.md), sau đó đọc [setup/tests](docs/development.md) và [ba ví dụ thay đổi](docs/change-recipes.md). F1/F2 hiện được điều phối trong `app/services/analysis/workflows.py`; F3 có các bước riêng trong `app/services/recommendation/`. Endpoint chỉ xử lý HTTP.
 
 Kết quả kiểm thử và đối chiếu trước/sau được ghi tại [nghiệm thu refactor](docs/refactor-verification.md).
+
+Real catalog preparation: [workflow](docs/real-catalog.md) and [local verification](docs/real-catalog-verification.md). A corrected [separate bundle](docs/embedding-bundle.md) is now available; see [verification](docs/embedding-bundle-verification.md). The application still uses its original data paths.
+
+F3 review preparation: [API integration, offline gallery and pilot](docs/catalog-review-pilot.md), with [measured verification](docs/catalog-review-verification.md).

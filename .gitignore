@@ -52,6 +52,7 @@ ehthumbs.db
 
 # --- Test / Coverage ---
 .pytest_cache/
+.ipynb_checkpoints/
 htmlcov/
 .coverage
 .coverage.*
@@ -60,6 +61,9 @@ coverage.xml
 # --- Logs ---
 *.log
 logs/
+
+# Private evaluation inputs; commit synthetic fixtures only.
+/evals/local/
 
 # --- AI / IDE tooling (không thuộc source app) ---
 .gitnexus

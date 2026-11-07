@@ -12,13 +12,13 @@ class _FakeResponse:
 
 
 class _FakeModel:
-    def generate_content(self, *_args, **_kwargs):
+    async def generate_content(self, *_args, **_kwargs):
         return _FakeResponse("{}")
 
 
 def test_invalid_structured_response_does_not_open_circuit_breaker(monkeypatch) -> None:
     client = GeminiClient()
-    monkeypatch.setattr(client, "_build_model", lambda *_args, **_kwargs: _FakeModel())
+    monkeypatch.setattr(client, "_generate_once", _FakeModel().generate_content)
 
     with pytest.raises(GeminiInvalidResponseError):
         asyncio.run(

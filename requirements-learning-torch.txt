@@ -1,0 +1,4 @@
+# CPU-only wheels; no CUDA packages or pretrained model weights.
+# Install after requirements-learning.txt in the optional learning environment.
+--index-url https://download.pytorch.org/whl/cpu
+torch==2.7.1

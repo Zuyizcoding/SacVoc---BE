@@ -87,6 +87,13 @@ Fallback được lưu vào cùng hồ sơ thiết bị, có thể thay kết qu
 
 `GEMINI_MAX_RETRIES` là tên cấu hình cũ: giá trị là **tổng số lần gọi SDK trong một lượt suy luận**, mặc định 2. Repair là lượt suy luận khác. Lỗi quota, upstream busy, timeout và JSON sai có quy tắc backoff riêng; xem tests trước khi thay đổi.
 
+The API wrappers retain persistence and fallback behavior. The shared
+`analyze_image(mode="evaluation")` entry point has no database dependency and
+propagates overload/timeout instead of returning demo data. The new Google GenAI
+SDK adapter uses direct Pydantic schemas, explicit millisecond timeout conversion,
+and one SDK attempt per application attempt. See [evaluation.md](evaluation.md)
+for the English walkthrough and opt-in tracing contract.
+
 ## F3: query, vectors, catalog, ranking
 
 ```mermaid

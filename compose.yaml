@@ -1,0 +1,19 @@
+services:
+  api:
+    build: .
+    ports:
+      - "${API_BIND_HOST:-127.0.0.1}:${API_PORT:-8000}:8000"
+    environment:
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GEMINI_MODEL: "${GEMINI_MODEL:-gemini-2.5-flash}"
+      GEMINI_TIMEOUT: "${GEMINI_TIMEOUT:-30}"
+      GEMINI_MAX_RETRIES: "${GEMINI_MAX_RETRIES:-2}"
+      GEMINI_THINKING_BUDGET: "${GEMINI_THINKING_BUDGET:-1024}"
+      DATABASE_URL: sqlite:////var/lib/sacvoc/sac_voc.db
+      DEBUG: "false"
+    volumes:
+      - sacvoc-data:/var/lib/sacvoc
+    restart: unless-stopped
+
+volumes:
+  sacvoc-data:

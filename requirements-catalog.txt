@@ -1,0 +1,11 @@
+# Optional offline catalog environment. Keep separate from the web server.
+# First install CPU Torch via requirements-learning-torch.txt.
+numpy==2.2.2
+pydantic==2.10.5
+pydantic-settings==2.7.1
+SQLAlchemy==2.0.37
+Pillow==11.1.0
+transformers==4.52.4
+huggingface-hub==0.36.2
+tokenizers==0.21.4
+safetensors==0.8.0

@@ -1,0 +1,7 @@
+# Lightweight test/CI environment; no FashionCLIP, Torch, or model downloads.
+-r requirements.txt
+
+pytest==8.3.4
+httpx==0.28.1
+ruff==0.9.4
+pytest-socket==0.7.0
